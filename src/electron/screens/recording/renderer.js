@@ -268,7 +268,7 @@ const updateSearchStatus = () => {
   searchStatusEl.textContent = `${current}/${searchMatches.length} matches`;
 };
 
-const selectMatchByIndex = (index) => {
+const selectMatchByIndex = (index, { focusEditor = true } = {}) => {
   if (!searchMatches.length) {
     activeSearchIndex = -1;
     updateSearchStatus();
@@ -278,12 +278,14 @@ const selectMatchByIndex = (index) => {
   const normalized = ((index % searchMatches.length) + searchMatches.length) % searchMatches.length;
   activeSearchIndex = normalized;
   const match = searchMatches[normalized];
-  markdownEditorEl.focus();
+  if (focusEditor) {
+    markdownEditorEl.focus();
+  }
   markdownEditorEl.setSelectionRange(match.start, match.end);
   updateSearchStatus();
 };
 
-const updateSearchMatches = () => {
+const updateSearchMatches = ({ focusEditor = true } = {}) => {
   const term = searchInputEl.value;
   const text = markdownEditorEl.value;
 
@@ -312,7 +314,7 @@ const updateSearchMatches = () => {
   }
 
   if (searchMatches.length) {
-    selectMatchByIndex(0);
+    selectMatchByIndex(0, { focusEditor });
   } else {
     updateSearchStatus();
   }
@@ -504,7 +506,7 @@ saveMarkdownEl.addEventListener("click", async () => {
   }
 });
 
-searchInputEl.addEventListener("input", updateSearchMatches);
+searchInputEl.addEventListener("input", () => updateSearchMatches({ focusEditor: false }));
 document.getElementById("search-next").addEventListener("click", gotoNextMatch);
 document.getElementById("search-prev").addEventListener("click", gotoPrevMatch);
 document.getElementById("replace-one").addEventListener("click", replaceCurrentMatch);
