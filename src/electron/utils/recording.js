@@ -11,8 +11,18 @@ let recordingProcess = null;
 let stdoutBuffer = "";
 let stderrBuffer = "";
 let forceKillTimer = null;
+let statusObserver = null;
+let levelsObserver = null;
 
 const sendStatus = (status, timestamp = Date.now(), filepath = null, details = "") => {
+  if (typeof statusObserver === "function") {
+    try {
+      statusObserver({ status, timestamp, filepath, details });
+    } catch {
+      // Non-fatal observer errors.
+    }
+  }
+
   if (!global.mainWindow || global.mainWindow.isDestroyed()) {
     return;
   }
@@ -21,6 +31,14 @@ const sendStatus = (status, timestamp = Date.now(), filepath = null, details = "
 };
 
 const sendAudioLevels = (systemLevel = 0, micLevel = 0) => {
+  if (typeof levelsObserver === "function") {
+    try {
+      levelsObserver({ systemLevel, micLevel });
+    } catch {
+      // Non-fatal observer errors.
+    }
+  }
+
   if (!global.mainWindow || global.mainWindow.isDestroyed()) {
     return;
   }
@@ -190,7 +208,9 @@ module.exports.startRecording = async ({ filepath, filename, micDeviceId }) => {
   }
 
   if (!isPermissionGranted) {
-    global.mainWindow.loadFile(getPermissionDeniedScreenPath());
+    if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+      global.mainWindow.loadFile(getPermissionDeniedScreenPath());
+    }
     sendStatus("START_FAILED", Date.now(), null, "Grant screen recording permission in System Settings and retry.");
 
     return;
@@ -207,7 +227,9 @@ module.exports.startRecording = async ({ filepath, filename, micDeviceId }) => {
         buttons: ["OK"],
       });
 
-      global.mainWindow.loadFile(getRecordingScreenPath());
+      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+        global.mainWindow.loadFile(getRecordingScreenPath());
+      }
       sendStatus("START_FAILED", Date.now(), null, "A recording with this filename already exists.");
 
       return;
@@ -254,4 +276,9 @@ module.exports.listInputDevices = async () => {
   }
 
   throw new Error("Failed to list microphone devices.");
+};
+
+module.exports.setRecordingObservers = ({ onStatus, onLevels } = {}) => {
+  statusObserver = typeof onStatus === "function" ? onStatus : null;
+  levelsObserver = typeof onLevels === "function" ? onLevels : null;
 };

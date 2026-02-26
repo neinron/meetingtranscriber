@@ -41,6 +41,17 @@ const saveMarkdownEl = document.getElementById("save-markdown");
 const openTranscriptFolderEl = document.getElementById("open-transcript-folder");
 const searchInputEl = document.getElementById("search-input");
 const replaceInputEl = document.getElementById("replace-input");
+const recordingFilenameEl = document.getElementById("recording-filename");
+
+const getDefaultMeetingFilename = () => {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, "0");
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(now.getFullYear());
+  const hh = String(now.getHours()).padStart(2, "0");
+  const min = String(now.getMinutes()).padStart(2, "0");
+  return `Meeting_Recording-${dd}${mm}${yyyy}-${hh}${min}`;
+};
 
 const setAudioLevels = (systemLevel = 0, micLevel = 0) => {
   const systemPct = Math.max(0, Math.min(100, Math.round(systemLevel * 100)));
@@ -169,7 +180,7 @@ const refreshMicrophones = async () => {
   }
 };
 
-const updateRecordingMeta = () => {
+const updateRecordingMeta = async () => {
   const selectedPath = recordingSelectEl.value;
   const selected = recordings.find((recording) => recording.path === selectedPath);
 
@@ -181,8 +192,18 @@ const updateRecordingMeta = () => {
   }
 
   const modified = new Date(selected.modifiedAt).toLocaleString();
-  recordingMetaEl.textContent = `Size: ${formatSize(selected.sizeBytes)} • Modified: ${modified}`;
-  recordingPlayerEl.src = pathToFileURL(selected.path).href;
+  const created = selected.createdAt ? new Date(selected.createdAt).toLocaleString() : modified;
+  recordingMetaEl.textContent = `Size: ${formatSize(selected.sizeBytes)} • Created: ${created}`;
+
+  try {
+    const { playbackPath } = await ipcRenderer.invoke("get-playback-source", selected.path);
+    recordingPlayerEl.src = pathToFileURL(playbackPath).href;
+    recordingPlayerEl.load();
+  } catch (error) {
+    recordingPlayerEl.removeAttribute("src");
+    recordingPlayerEl.load();
+    processingStatusEl.textContent = `Playback preparation failed: ${error.message}`;
+  }
 };
 
 const loadTranscriptForSelection = async () => {
@@ -246,7 +267,7 @@ const refreshRecordings = async () => {
       recordingSelectEl.appendChild(option);
     });
 
-    updateRecordingMeta();
+    await updateRecordingMeta();
     await loadTranscriptForSelection();
   } catch (error) {
     processingStatusEl.textContent = `Failed to load recordings: ${error.message}`;
@@ -391,8 +412,12 @@ openTranscriptFolderEl.addEventListener("click", () => {
   ipcRenderer.invoke("open-path", transcriptsFolderPath);
 });
 
-document.getElementById("recording-filename").addEventListener("input", (event) => {
+recordingFilenameEl.addEventListener("input", (event) => {
   recordingFilename = event.target.value;
+});
+
+recordingPlayerEl.addEventListener("error", () => {
+  processingStatusEl.textContent = "Playback failed for this file format in the embedded player.";
 });
 
 microphoneSelectEl.addEventListener("change", (event) => {
@@ -457,7 +482,7 @@ document.getElementById("output-file-path").addEventListener("click", () => {
 
 document.getElementById("refresh-recordings").addEventListener("click", refreshRecordings);
 recordingSelectEl.addEventListener("change", async () => {
-  updateRecordingMeta();
+  await updateRecordingMeta();
   await loadTranscriptForSelection();
 });
 
@@ -524,6 +549,9 @@ const init = async () => {
   selectedFolderPathEl.textContent = selectedFolderPath;
   selectedTranscriptsPathEl.textContent = transcriptsFolderPath;
   openTranscriptFolderEl.disabled = false;
+
+  recordingFilename = getDefaultMeetingFilename();
+  recordingFilenameEl.value = recordingFilename;
 
   setRecordingToggleState();
   await refreshRecordings();

@@ -562,8 +562,9 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
 extension Date {
     func toFormattedFileName() -> String {
         let fileNameFormatter = DateFormatter()
-        fileNameFormatter.dateFormat = "y-MM-dd HH.mm.ss"
-        return fileNameFormatter.string(from: self)
+        fileNameFormatter.locale = Locale(identifier: "en_US_POSIX")
+        fileNameFormatter.dateFormat = "ddMMyyyy-HHmm"
+        return "Meeting_Recording-\(fileNameFormatter.string(from: self))"
     }
 }
 

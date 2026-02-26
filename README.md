@@ -1,32 +1,120 @@
-# Electron System Audio Capture & Recording for MacOS
-Hey 👋! Luke/YAE here - I just wanted to give another huge props to Sebastian for helping me to make this, for a little context this project came about through my own frustrations at the Electron documentation not supporting a clean MacOS experience for system audio capture [documentation found here](https://www.electronjs.org/docs/latest/api/desktop-capturer#caveats). And as a result I set about to create a clean way to do so - the requirements being:
+# Scriby
 
-1. No user setup except for what they'll be used to ex. permissions
-2. It couldn't feel too far from a native experience
+Scriby is a macOS desktop app (Electron + Swift) for recording system audio and microphone audio, generating transcripts with Gemini, and editing transcripts in a built-in markdown editor.
 
-I created an original prototype of what this would look like, but for the life of me I couldn't get the Swift code working - that's where Sebastian came in to take over from me after many chats. Sebastian was compensated for his work on this project, and we mutually agreed that it should be fully open source and not backed by any corporate sponsors (please do not reach out for that). And I'm proud to say, he's smashed it out of the park - far beyond what I was expecting of him!
+## Core Features
 
-As a side note - he's open to work, reach out to him here: https://www.linkedin.com/in/sebastian-w%C4%85sik-b23840174/ I highly recommend him!
+- Record system audio and optional microphone input in one FLAC file
+- Select microphone device before recording
+- Live system/mic level meters during recording
+- Tray (menu bar) controls for opening app and start/stop recording
+- Recording playback for selected files
+- Transcript generation via Gemini (`gemini-2.5-flash` / `gemini-2.5-pro`)
+- Built-in transcript editor with search + replace workflow
+- Central app storage for recordings and transcripts
 
-The project is available under the MIT license, however, you're unlikely to get any support - you can definetly reach out and I'll do my best but we're both busy people and the point of this project was to encourage the adoption and pushing of Electron.
+## Requirements
 
-To set up the project, please check out package.json for instructions and dependencies.
+- macOS (ScreenCaptureKit-capable system)
+- Node.js + npm
+- Xcode command line tools (for Swift compile)
+- Gemini API key
 
-Tags:
-MacOS System Audio Capture Electron
-
-## Quick Start
+## Installation
 
 1. Install dependencies:
-   - `npm install`
+
+```bash
+npm install
+```
+
 2. Build the Swift recorder binary:
-   - `npm run swift:make`
-3. Configure environment:
-   - Copy `.env.example` to `.env`
-   - Set `GEMINI_API_KEY`
-4. Run the app:
-   - `npm run electron:start`
 
-## Project Tasks
+```bash
+npm run swift:make
+```
 
-See `TASK_LIST.md` for completed stabilization work and pending hardening items.
+3. Create environment file:
+
+```bash
+cp .env.example .env
+```
+
+4. Set your Gemini API key in `.env`:
+
+```env
+GEMINI_API_KEY=your_key_here
+```
+
+## Run (Development)
+
+```bash
+npm run electron:start
+```
+
+## Build App Bundle
+
+```bash
+npm run electron:package
+```
+
+Built app output:
+
+- `out/Scriby-darwin-arm64/Scriby.app`
+
+## macOS Permissions
+
+Scriby requires:
+
+- Screen Recording permission (for system audio capture)
+- Microphone permission (if mic recording is enabled)
+
+If devices or capture fail, check:
+
+- `System Settings > Privacy & Security > Screen Recording`
+- `System Settings > Privacy & Security > Microphone`
+
+## Storage Locations
+
+Scriby stores files under app support:
+
+- Recordings: `~/Library/Application Support/scriby/storage/recordings`
+- Transcripts: `~/Library/Application Support/scriby/storage/transcripts`
+
+(Actual path follows Electron `app.getPath("userData")`.)
+
+## Tray / Menu Bar
+
+The menu bar item provides:
+
+- Open Scriby
+- Start/Stop recording
+- Recording name
+- Recording length
+- Live level summary
+- Stop Scriby
+
+## Transcript Output Behavior
+
+Gemini prompt is configured to return transcript-only output:
+
+- No summary section
+- No action items section
+
+## Scripts
+
+- `npm run swift:make` — compile Swift recorder binary
+- `npm run electron:start` — run app in development
+- `npm run electron:package` — package macOS app bundle
+- `npm run electron:make` — run Electron Forge make flow
+
+## Troubleshooting
+
+- `ENOENT package.json`: run commands from this project folder.
+- No microphone devices listed: ensure mic permission is granted for Scriby.
+- Tray icon not updating: fully quit app and relaunch packaged build.
+- Recording stops unexpectedly: verify permissions and avoid display/audio device changes during active capture.
+
+## License
+
+MIT

@@ -17,13 +17,14 @@ const listRecordings = async (folderPath, transcriptsFolderPath = folderPath) =>
           name: entry.name,
           path: absolutePath,
           sizeBytes: stats.size,
+          createdAt: new Date(stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs).toISOString(),
           modifiedAt: stats.mtime.toISOString(),
           transcriptPath,
         };
       })
   );
 
-  return recordings.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
+  return recordings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };
 
 module.exports = {

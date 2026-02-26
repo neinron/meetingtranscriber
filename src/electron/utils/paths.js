@@ -18,7 +18,14 @@ const getRecorderBinaryPath = () => {
       fs.mkdirSync(extractedDir, { recursive: true });
     }
 
-    if (!fs.existsSync(extractedRecorderPath)) {
+    // Always refresh the extracted binary so packaged app updates don't
+    // keep using an older recorder from a previous install/run.
+    fs.copyFileSync(bundledRecorderPath, extractedRecorderPath);
+    fs.chmodSync(extractedRecorderPath, 0o755);
+
+    const bundledStats = fs.statSync(bundledRecorderPath);
+    const extractedStats = fs.statSync(extractedRecorderPath);
+    if (bundledStats.size !== extractedStats.size) {
       fs.copyFileSync(bundledRecorderPath, extractedRecorderPath);
       fs.chmodSync(extractedRecorderPath, 0o755);
     }
