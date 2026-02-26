@@ -14,3 +14,19 @@ To set up the project, please check out package.json for instructions and depend
 
 Tags:
 MacOS System Audio Capture Electron
+
+## Quick Start
+
+1. Install dependencies:
+   - `npm install`
+2. Build the Swift recorder binary:
+   - `npm run swift:make`
+3. Configure environment:
+   - Copy `.env.example` to `.env`
+   - Set `GEMINI_API_KEY`
+4. Run the app:
+   - `npm run electron:start`
+
+## Project Tasks
+
+See `TASK_LIST.md` for completed stabilization work and pending hardening items.

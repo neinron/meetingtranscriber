@@ -3,16 +3,12 @@ const { FuseV1Options, FuseVersion } = require("@electron/fuses");
 
 module.exports = {
   packagerConfig: {
-    asar: true,
-
-    // TODO: add signing config
-    osxSign: {},
-    osxNotarize: {
-      tool: "notarytool",
-      appleApiKey: process.env.APPLE_API_KEY,
-      appleApiKeyId: process.env.APPLE_API_KEY_ID,
-      appleApiIssuer: process.env.APPLE_API_ISSUER,
+    asar: {
+      unpack: "src/swift/Recorder",
     },
+
+    // Local builds are unsigned by default; add signing/notarization in CI/release config.
+    osxSign: false,
   },
   rebuildConfig: {},
   makers: [
