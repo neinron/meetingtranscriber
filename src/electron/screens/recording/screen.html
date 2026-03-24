@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="script-src 'self' https://cdn.tailwindcss.com;" />
-    <title>Scriby</title>
+    <title>Meetlify</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       :root {
@@ -93,12 +93,7 @@
     </style>
   </head>
   <body class="min-h-screen">
-    <div class="mx-auto max-w-7xl px-4 pb-8 pt-6 sm:px-6 lg:px-8 space-y-6">
-      <header class="text-center">
-        <h1 class="text-4xl font-semibold tracking-tight">Scriby</h1>
-        <p class="mt-2 text-sm text-slate-600">System + microphone recording, live meters, transcript editing, and playback.</p>
-      </header>
-
+    <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 space-y-6">
       <section class="grid gap-6 lg:grid-cols-3">
         <div class="glass-card rounded-2xl p-5 shadow-sm">
           <h2 class="text-lg font-semibold">Recording</h2>
@@ -140,6 +135,19 @@
               <button id="open-transcript-folder" class="mt-2 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" disabled>
                 Open Transcript Folder
               </button>
+            </div>
+
+            <div class="md:col-span-2">
+              <label class="mb-2 block text-sm font-medium">Permissions</label>
+              <div class="flex flex-wrap gap-2">
+                <button id="check-permissions" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
+                  Check Permissions
+                </button>
+                <button id="request-mic-permission" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
+                  Request Microphone Permission
+                </button>
+              </div>
+              <p class="mt-2 text-xs text-slate-500">Use this to trigger macOS permission prompts (Screen Recording + Microphone).</p>
             </div>
 
             <div class="md:col-span-2">

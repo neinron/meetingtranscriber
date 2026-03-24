@@ -3,8 +3,8 @@ const { FuseV1Options, FuseVersion } = require("@electron/fuses");
 
 module.exports = {
   packagerConfig: {
-    name: "Scriby",
-    executableName: "Scriby",
+    name: "Meetlify",
+    executableName: "Meetlify",
     icon: "assets/icon/icon",
     asar: {
       unpack: "src/swift/Recorder",

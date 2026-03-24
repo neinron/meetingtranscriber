@@ -1,9 +1,9 @@
 {
-  "name": "scriby",
-  "productName": "Scriby",
+  "name": "meetlify",
+  "productName": "Meetlify",
   "version": "1.0.0",
   "author": "Sebastian Wąsik",
-  "description": "Scriby Meeting Transcriber",
+  "description": "Meetlify Meeting Transcriber",
   "main": "./src/electron/main.js",
   "scripts": {
     "swift:make": "swiftc -o src/swift/Recorder src/swift/Recorder.swift",

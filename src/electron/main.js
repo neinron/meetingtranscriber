@@ -1,9 +1,8 @@
 const path = require("node:path");
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Tray, nativeImage, systemPreferences } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Tray, nativeImage, systemPreferences, desktopCapturer } = require("electron");
 const { loadEnv } = require("./utils/env");
 loadEnv();
 
-const { checkPermissions } = require("./utils/permission");
 const { startRecording, stopRecording, listInputDevices, setRecordingObservers } = require("./utils/recording");
 const { listRecordings } = require("./utils/recordings");
 const { processRecordingWithGemini } = require("./utils/gemini");
@@ -61,6 +60,34 @@ const requestMicrophonePermissionIfNeeded = async () => {
   }
 };
 
+const openMicrophoneSettings = async () => {
+  await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+};
+
+const ensureScreenPermissionFromApp = async () => {
+  if (process.platform !== "darwin") {
+    return true;
+  }
+
+  const currentStatus = systemPreferences.getMediaAccessStatus("screen");
+  if (currentStatus === "granted") {
+    return true;
+  }
+
+  if (currentStatus === "not-determined") {
+    try {
+      await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: 1, height: 1 },
+      });
+    } catch (error) {
+      logError("screen-permission-request", error);
+    }
+  }
+
+  return systemPreferences.getMediaAccessStatus("screen") === "granted";
+};
+
 const formatDuration = (startedAtMs) => {
   if (!startedAtMs) return "00:00:00";
   const totalSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
@@ -98,11 +125,28 @@ const openMainWindow = async () => {
 const startRecordingFromTray = async () => {
   const { recordingsPath } = getStoragePaths();
   const filename = (lastStartOptions.filename || "").trim() || getDefaultFilename();
+  const micDeviceId = lastStartOptions.micDeviceId ?? null;
+
+  if (micDeviceId !== null) {
+    const micGranted = await ensureMicrophonePermission();
+    if (!micGranted) {
+      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+        global.mainWindow.webContents.send(
+          "recording-status",
+          "START_FAILED",
+          Date.now(),
+          null,
+          "Microphone permission denied. Enable it in System Settings > Privacy & Security > Microphone."
+        );
+      }
+      return;
+    }
+  }
 
   await startRecording({
     filepath: recordingsPath,
     filename,
-    micDeviceId: lastStartOptions.micDeviceId,
+    micDeviceId,
   });
 };
 
@@ -112,7 +156,7 @@ const updateTrayMenu = () => {
   const totalLevel = Math.min(1, (trayState.systemLevel || 0) + (trayState.micLevel || 0));
   const template = [
     {
-      label: "Open Scriby",
+      label: "Open Meetlify",
       click: () => {
         openMainWindow().catch((error) => logError("tray-open-window", error));
       },
@@ -137,13 +181,13 @@ const updateTrayMenu = () => {
     },
     { type: "separator" },
     {
-      label: "Stop Scriby",
+      label: "Stop Meetlify",
       click: () => app.quit(),
     },
   ];
 
   tray.setContextMenu(Menu.buildFromTemplate(template));
-  tray.setToolTip(trayState.isRecording ? `Scriby • Recording ${formatDuration(trayState.startedAtMs)}` : "Scriby");
+  tray.setToolTip(trayState.isRecording ? `Meetlify • Recording ${formatDuration(trayState.startedAtMs)}` : "Meetlify");
 };
 
 const setTrayTicking = (enabled) => {
@@ -217,7 +261,7 @@ const createWindow = async () => {
   });
 
   try {
-    const isPermissionGranted = await checkPermissions();
+    const isPermissionGranted = await ensureScreenPermissionFromApp();
     await requestMicrophonePermissionIfNeeded();
 
     if (isPermissionGranted) {
@@ -238,6 +282,20 @@ ipcMain.on("start-recording", async (_, { filename, micDeviceId }) => {
   };
 
   try {
+    const screenGranted = await ensureScreenPermissionFromApp();
+    if (!screenGranted) {
+      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+        global.mainWindow.webContents.send(
+          "recording-status",
+          "START_FAILED",
+          Date.now(),
+          null,
+          "Screen recording permission denied. Enable it in System Settings > Privacy & Security > Screen Recording."
+        );
+      }
+      return;
+    }
+
     if (micDeviceId !== null) {
       const micGranted = await ensureMicrophonePermission();
       if (!micGranted) {
@@ -311,7 +369,10 @@ ipcMain.handle("save-markdown", async (_, { markdownPath, content }) => {
 });
 
 ipcMain.handle("open-path", async (_, targetPath) => {
-  await shell.openPath(targetPath);
+  const errorMessage = await shell.openPath(targetPath);
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
   return { ok: true };
 });
 
@@ -323,7 +384,7 @@ ipcMain.handle("get-playback-source", async (_, recordingPath) => {
 ipcMain.handle("check-permissions", async () => {
   let isPermissionGranted = false;
   try {
-    isPermissionGranted = await checkPermissions();
+    isPermissionGranted = await ensureScreenPermissionFromApp();
     await requestMicrophonePermissionIfNeeded();
   } catch (error) {
     logError("check-permissions", error);
@@ -352,6 +413,27 @@ ipcMain.handle("check-permissions", async () => {
   }
 
   return { ok: true };
+});
+
+ipcMain.handle("request-microphone-permission", async () => {
+  const micGranted = await requestMicrophonePermissionIfNeeded();
+  if (!micGranted) {
+    const response = await dialog.showMessageBox(global.mainWindow, {
+      type: "warning",
+      title: "Microphone Permission Required",
+      message: "Microphone access is not granted. Open System Settings now?",
+      buttons: ["Open Settings", "Cancel"],
+    });
+
+    if (response.response === 0) {
+      await openMicrophoneSettings();
+    }
+  }
+
+  return {
+    ok: micGranted,
+    status: systemPreferences.getMediaAccessStatus("microphone"),
+  };
 });
 
 process.on("uncaughtException", (error) => {

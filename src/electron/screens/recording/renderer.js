@@ -41,6 +41,8 @@ const saveMarkdownEl = document.getElementById("save-markdown");
 const openTranscriptFolderEl = document.getElementById("open-transcript-folder");
 const searchInputEl = document.getElementById("search-input");
 const replaceInputEl = document.getElementById("replace-input");
+const checkPermissionsEl = document.getElementById("check-permissions");
+const requestMicPermissionEl = document.getElementById("request-mic-permission");
 const recordingFilenameEl = document.getElementById("recording-filename");
 
 const getDefaultMeetingFilename = () => {
@@ -402,14 +404,50 @@ const replaceAllMatches = () => {
   updateSearchMatches();
 };
 
-document.getElementById("select-folder").addEventListener("click", () => {
+document.getElementById("select-folder").addEventListener("click", async () => {
   if (!selectedFolderPath) return;
-  ipcRenderer.invoke("open-path", selectedFolderPath);
+  try {
+    await ipcRenderer.invoke("open-path", selectedFolderPath);
+  } catch (error) {
+    processingStatusEl.textContent = `Could not open recordings folder: ${error.message}`;
+  }
 });
 
-openTranscriptFolderEl.addEventListener("click", () => {
+openTranscriptFolderEl.addEventListener("click", async () => {
   if (!transcriptsFolderPath) return;
-  ipcRenderer.invoke("open-path", transcriptsFolderPath);
+  try {
+    await ipcRenderer.invoke("open-path", transcriptsFolderPath);
+  } catch (error) {
+    processingStatusEl.textContent = `Could not open transcripts folder: ${error.message}`;
+  }
+});
+
+checkPermissionsEl.addEventListener("click", async () => {
+  try {
+    const result = await ipcRenderer.invoke("check-permissions");
+    if (result?.ok) {
+      processingStatusEl.textContent = "Permissions check complete.";
+      await refreshMicrophones();
+    } else {
+      processingStatusEl.textContent = "Permissions check failed.";
+    }
+  } catch (error) {
+    processingStatusEl.textContent = `Permissions check failed: ${error.message}`;
+  }
+});
+
+requestMicPermissionEl.addEventListener("click", async () => {
+  try {
+    const result = await ipcRenderer.invoke("request-microphone-permission");
+    if (result?.ok) {
+      processingStatusEl.textContent = "Microphone permission granted.";
+      await refreshMicrophones();
+      return;
+    }
+    processingStatusEl.textContent = `Microphone permission status: ${result?.status || "unknown"}`;
+  } catch (error) {
+    processingStatusEl.textContent = `Microphone permission request failed: ${error.message}`;
+  }
 });
 
 recordingFilenameEl.addEventListener("input", (event) => {
@@ -474,10 +512,14 @@ ipcRenderer.on("recording-levels", (_, levels) => {
   setAudioLevels(levels?.systemLevel || 0, levels?.micLevel || 0);
 });
 
-document.getElementById("output-file-path").addEventListener("click", () => {
+document.getElementById("output-file-path").addEventListener("click", async () => {
   const filePath = document.getElementById("output-file-path").textContent;
   if (!filePath || filePath === "Start recording to see the file path") return;
-  ipcRenderer.invoke("open-path", path.dirname(filePath));
+  try {
+    await ipcRenderer.invoke("open-path", path.dirname(filePath));
+  } catch (error) {
+    processingStatusEl.textContent = `Could not open recording folder: ${error.message}`;
+  }
 });
 
 document.getElementById("refresh-recordings").addEventListener("click", refreshRecordings);
@@ -543,21 +585,25 @@ markdownEditorEl.addEventListener("input", () => {
 });
 
 const init = async () => {
-  const storagePaths = await ipcRenderer.invoke("get-storage-paths");
-  selectedFolderPath = storagePaths.recordingsPath;
-  transcriptsFolderPath = storagePaths.transcriptsPath;
-  selectedFolderPathEl.textContent = selectedFolderPath;
-  selectedTranscriptsPathEl.textContent = transcriptsFolderPath;
-  openTranscriptFolderEl.disabled = false;
+  try {
+    const storagePaths = await ipcRenderer.invoke("get-storage-paths");
+    selectedFolderPath = storagePaths.recordingsPath;
+    transcriptsFolderPath = storagePaths.transcriptsPath;
+    selectedFolderPathEl.textContent = selectedFolderPath;
+    selectedTranscriptsPathEl.textContent = transcriptsFolderPath;
+    openTranscriptFolderEl.disabled = false;
 
-  recordingFilename = getDefaultMeetingFilename();
-  recordingFilenameEl.value = recordingFilename;
+    recordingFilename = getDefaultMeetingFilename();
+    recordingFilenameEl.value = recordingFilename;
 
-  setRecordingToggleState();
-  await refreshRecordings();
-  await refreshMicrophones();
-  renderPreview();
-  updateSearchMatches();
+    setRecordingToggleState();
+    await refreshRecordings();
+    await refreshMicrophones();
+    renderPreview();
+    updateSearchMatches();
+  } catch (error) {
+    processingStatusEl.textContent = `Initialization failed: ${error.message}`;
+  }
 };
 
 init();

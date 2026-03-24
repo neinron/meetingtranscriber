@@ -30,7 +30,8 @@ const smoothDiarizedTranscript = (markdown) => {
 
   const flushPending = () => {
     if (!pending) return;
-    output.push(`[${pending.timestamp}] ${pending.speaker}: ${pending.text.trim()}`);
+    // Add two line breaks after each transcript line for Notion block separation
+    output.push(`[${pending.timestamp}] ${pending.speaker}: ${pending.text.trim()}\n`);
     pending = null;
   };
 
@@ -38,7 +39,7 @@ const smoothDiarizedTranscript = (markdown) => {
     const match = line.match(DIARIZATION_LINE_REGEX);
     if (!match) {
       flushPending();
-      output.push(line);
+      output.push(line + "\n");
       continue;
     }
 
@@ -58,6 +59,7 @@ const smoothDiarizedTranscript = (markdown) => {
   }
 
   flushPending();
+  // Join with an extra line break to ensure two line breaks between transcript lines
   return output.join("\n");
 };
 
@@ -283,10 +285,21 @@ const processRecordingWithGemini = async ({ filePath, model = DEFAULT_MODEL }) =
       dateTimeLabel: formatDateTimeForHeader(new Date()),
     });
 
-    const metadata = await requestMeetingMetadata({
-      apiKey,
-      transcriptText: transcript,
-    });
+    let metadata = {
+      title: "Meeting",
+      description: "Transcript generated. Review the notes and update the title if needed.",
+    };
+
+    try {
+      metadata = await requestMeetingMetadata({
+        apiKey,
+        transcriptText: transcript,
+      });
+    } catch (error) {
+      // Metadata is helpful, but a transcript without it is still usable.
+      // eslint-disable-next-line no-console
+      console.warn(`Gemini metadata generation failed: ${error.message}`);
+    }
 
     return template
       .replace(TITLE_PLACEHOLDER, metadata.title)
