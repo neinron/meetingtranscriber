@@ -30,8 +30,7 @@ const smoothDiarizedTranscript = (markdown) => {
 
   const flushPending = () => {
     if (!pending) return;
-    // Add two line breaks after each transcript line for Notion block separation
-    output.push(`[${pending.timestamp}] ${pending.speaker}: ${pending.text.trim()}\n`);
+    output.push(`[${pending.timestamp}] ${pending.speaker}: ${pending.text.trim()}`);
     pending = null;
   };
 
@@ -39,7 +38,10 @@ const smoothDiarizedTranscript = (markdown) => {
     const match = line.match(DIARIZATION_LINE_REGEX);
     if (!match) {
       flushPending();
-      output.push(line + "\n");
+      const plainLine = line.trim();
+      if (plainLine) {
+        output.push(plainLine);
+      }
       continue;
     }
 
@@ -59,8 +61,7 @@ const smoothDiarizedTranscript = (markdown) => {
   }
 
   flushPending();
-  // Join with an extra line break to ensure two line breaks between transcript lines
-  return output.join("\n");
+  return output.join("\n\n");
 };
 
 const getApiKey = () => {

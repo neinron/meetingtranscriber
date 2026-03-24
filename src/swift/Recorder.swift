@@ -66,6 +66,20 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
         }
     }
 
+    static func normalizedMicrophoneName(_ value: String?) -> String {
+        guard let value = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return ""
+        }
+
+        return value
+            .replacingOccurrences(of: #"^(?i)(default|standard)\s*[-:]\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s*\((?i)(built-in|default)\)\s*$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func processCommandLineArguments() {
         let arguments = CommandLine.arguments
         guard arguments.contains("--record") else {
@@ -130,10 +144,13 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
                 return AVCaptureDevice.default(for: .audio)
             }
 
+            let normalizedRequestedMic = Self.normalizedMicrophoneName(micDeviceID)
+
             return Self.audioCaptureDevices().first {
                 $0.uniqueID == micDeviceID
                 || $0.localizedName == micDeviceID
                 || $0.localizedName.caseInsensitiveCompare(micDeviceID) == .orderedSame
+                || Self.normalizedMicrophoneName($0.localizedName).caseInsensitiveCompare(normalizedRequestedMic) == .orderedSame
             }
         }()
 
@@ -516,12 +533,13 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         processingQueue.async { [weak self] in
             guard let self = self else { return }
+            let errorMessage = error.localizedDescription
             if !self.didStartRecording {
-                self.failStartup(code: "STREAM_ERROR")
+                self.failStartup(code: "STREAM_ERROR: \(errorMessage)")
                 return
             }
             if !self.isStopping {
-                ResponseHandler.returnResponse(["code": "STREAM_ERROR"], shouldExitProcess: false)
+                ResponseHandler.returnResponse(["code": "STREAM_ERROR: \(errorMessage)"], shouldExitProcess: false)
                 self.stopAndFinalize()
             }
         }

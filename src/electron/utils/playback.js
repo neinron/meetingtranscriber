@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const util = require("node:util");
+const { resolveFfmpegPath } = require("./export");
 
 const execFileAsync = util.promisify(execFile);
 
@@ -33,7 +34,25 @@ const ensurePlaybackPreview = async (recordingPath) => {
         previewPath,
       ]);
     } catch {
-      throw new Error("Could not decode this FLAC recording for in-app playback.");
+      try {
+        const ffmpegPath = resolveFfmpegPath();
+        await execFileAsync(ffmpegPath, [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-y",
+          "-i",
+          recordingPath,
+          "-vn",
+          "-ac",
+          "2",
+          "-ar",
+          "48000",
+          previewPath,
+        ]);
+      } catch {
+        throw new Error("Could not decode this recording for in-app playback.");
+      }
     }
   }
 

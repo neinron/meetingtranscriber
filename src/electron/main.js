@@ -61,6 +61,14 @@ const requestMicrophonePermissionIfNeeded = async () => {
   }
 };
 
+const getMicrophonePermissionMessage = (status = systemPreferences.getMediaAccessStatus("microphone")) => {
+  if (status === "denied" || status === "restricted") {
+    return "Microphone access was previously denied. Open System Settings > Privacy & Security > Microphone, enable Meetlify, then relaunch the app.";
+  }
+
+  return "Meetlify could not get microphone access. Trigger the microphone prompt from inside the app and accept it when macOS asks.";
+};
+
 const openMicrophoneSettings = async () => {
   await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
 };
@@ -137,7 +145,7 @@ const startRecordingFromTray = async () => {
           "START_FAILED",
           Date.now(),
           null,
-          "Microphone permission denied. Enable it in System Settings > Privacy & Security > Microphone."
+          getMicrophonePermissionMessage()
         );
       }
       return;
@@ -277,10 +285,15 @@ const createWindow = async () => {
 
   try {
     const isPermissionGranted = await ensureScreenPermissionFromApp();
-    await requestMicrophonePermissionIfNeeded();
 
     if (isPermissionGranted) {
       await safeLoadScreen(getRecordingScreenPath());
+
+      global.mainWindow.webContents.once("did-finish-load", () => {
+        requestMicrophonePermissionIfNeeded().catch((error) => {
+          logError("startup-microphone-permission", error);
+        });
+      });
     } else {
       await safeLoadScreen(getPermissionDeniedScreenPath());
     }
@@ -320,7 +333,7 @@ ipcMain.on("start-recording", async (_, { filename, micDeviceId }) => {
             "START_FAILED",
             Date.now(),
             null,
-            "Microphone permission denied. Enable it in System Settings > Privacy & Security > Microphone."
+            getMicrophonePermissionMessage()
           );
         }
         return;
@@ -355,9 +368,16 @@ ipcMain.handle("list-recordings", async () => {
 ipcMain.handle("list-input-devices", async () => {
   const micGranted = await ensureMicrophonePermission();
   if (!micGranted) {
-    throw new Error("Microphone permission denied. Enable it in System Settings > Privacy & Security > Microphone.");
+    throw new Error(getMicrophonePermissionMessage());
   }
   return listInputDevices();
+});
+
+ipcMain.handle("get-microphone-permission-status", async () => {
+  return {
+    status: systemPreferences.getMediaAccessStatus("microphone"),
+    message: getMicrophonePermissionMessage(),
+  };
 });
 
 ipcMain.handle("process-recording", async (_, { filePath, model }) => {
@@ -407,7 +427,6 @@ ipcMain.handle("check-permissions", async () => {
   let isPermissionGranted = false;
   try {
     isPermissionGranted = await ensureScreenPermissionFromApp();
-    await requestMicrophonePermissionIfNeeded();
   } catch (error) {
     logError("check-permissions", error);
     await dialog.showMessageBox(global.mainWindow, {
@@ -455,6 +474,7 @@ ipcMain.handle("request-microphone-permission", async () => {
   return {
     ok: micGranted,
     status: systemPreferences.getMediaAccessStatus("microphone"),
+    message: micGranted ? "Microphone access granted." : getMicrophonePermissionMessage(),
   };
 });
 
