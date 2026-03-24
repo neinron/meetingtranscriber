@@ -1,11 +1,16 @@
 const { FusesPlugin } = require("@electron-forge/plugin-fuses");
 const { FuseV1Options, FuseVersion } = require("@electron/fuses");
+const { copyPackagedAppToMainFolder } = require("./scripts/post-package");
 
 module.exports = {
+  hooks: {
+    postPackage: copyPackagedAppToMainFolder,
+  },
   packagerConfig: {
     name: "Meetlify",
     executableName: "Meetlify",
     icon: "assets/icon/icon",
+    extraResource: ["src/swift/Recorder"],
     asar: {
       unpack: "src/swift/Recorder",
     },

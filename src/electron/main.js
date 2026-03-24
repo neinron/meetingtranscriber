@@ -9,6 +9,7 @@ const { processRecordingWithGemini } = require("./utils/gemini");
 const { getTranscriptPathForRecording, readMarkdown, saveMarkdown } = require("./utils/markdown");
 const { getPermissionDeniedScreenPath, getRecordingScreenPath, getAppStoragePaths } = require("./utils/paths");
 const { ensurePlaybackPreview } = require("./utils/playback");
+const { exportRecordingToMp3 } = require("./utils/export");
 
 const isDev = !app.isPackaged;
 let tray = null;
@@ -204,11 +205,25 @@ const setTrayTicking = (enabled) => {
 };
 
 const getTrayIcon = () => {
-  const trayPngPath = path.join(app.getAppPath(), "assets", "tray", "menu-icon.png");
-  const image = nativeImage.createFromPath(trayPngPath);
+  const traySvg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+      <rect x="2" y="2" width="14" height="14" rx="2.2" fill="none" stroke="black" stroke-width="1.6"/>
+      <path d="M5.1 12.8V5.2h1.5l2.35 3.5 2.36-3.5h1.53v7.6h-1.39V7.61L8.95 11.2 6.49 7.61v5.19z" fill="black"/>
+    </svg>
+  `.trim();
+  const image = nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(traySvg)}`);
 
   if (image.isEmpty()) {
-    return nativeImage.createEmpty();
+    const trayPngPath = path.join(app.getAppPath(), "assets", "tray", "menu-icon.png");
+    const fallbackImage = nativeImage.createFromPath(trayPngPath);
+    if (fallbackImage.isEmpty()) {
+      return nativeImage.createEmpty();
+    }
+    const fallbackSized = fallbackImage.resize({ width: 18, height: 18 });
+    if (process.platform === "darwin") {
+      fallbackSized.setTemplateImage(true);
+    }
+    return fallbackSized;
   }
 
   const sized = image.resize({ width: 18, height: 18 });
@@ -356,6 +371,13 @@ ipcMain.handle("process-recording", async (_, { filePath, model }) => {
     transcriptPath,
     markdown,
   };
+});
+
+ipcMain.handle("export-recording-mp3", async (_, { filePath, chunked }) => {
+  return exportRecordingToMp3({
+    filePath,
+    chunked: Boolean(chunked),
+  });
 });
 
 ipcMain.handle("load-markdown", async (_, markdownPath) => {

@@ -1,37 +1,31 @@
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const { app } = require("electron");
-
-let cachedPackagedRecorderPath = null;
 
 const getRecorderBinaryPath = () => {
   if (app.isPackaged) {
-    if (cachedPackagedRecorderPath) {
-      return cachedPackagedRecorderPath;
+    const packagedCandidates = [
+      path.join(process.resourcesPath, "Recorder"),
+      path.join(process.resourcesPath, "app.asar.unpacked", "src", "swift", "Recorder"),
+      path.join(app.getAppPath(), "src", "swift", "Recorder"),
+    ];
+
+    for (const candidatePath of packagedCandidates) {
+      if (!fs.existsSync(candidatePath)) {
+        continue;
+      }
+
+      try {
+        fs.chmodSync(candidatePath, 0o755);
+      } catch {
+        // Ignore chmod failures and let the later spawn/exec path surface a real error if needed.
+      }
+
+      return candidatePath;
     }
 
-    const bundledRecorderPath = path.join(app.getAppPath(), "src", "swift", "Recorder");
-    const extractedDir = path.join(app.getPath("userData"), "bin");
-    const extractedRecorderPath = path.join(extractedDir, "Recorder");
-
-    if (!fs.existsSync(extractedDir)) {
-      fs.mkdirSync(extractedDir, { recursive: true });
-    }
-
-    // Always refresh the extracted binary so packaged app updates don't
-    // keep using an older recorder from a previous install/run.
-    fs.copyFileSync(bundledRecorderPath, extractedRecorderPath);
-    fs.chmodSync(extractedRecorderPath, 0o755);
-
-    const bundledStats = fs.statSync(bundledRecorderPath);
-    const extractedStats = fs.statSync(extractedRecorderPath);
-    if (bundledStats.size !== extractedStats.size) {
-      fs.copyFileSync(bundledRecorderPath, extractedRecorderPath);
-      fs.chmodSync(extractedRecorderPath, 0o755);
-    }
-
-    cachedPackagedRecorderPath = extractedRecorderPath;
-    return extractedRecorderPath;
+    throw new Error("Bundled recorder binary not found in packaged app resources.");
   }
 
   return path.join(app.getAppPath(), "src", "swift", "Recorder");
@@ -47,10 +41,33 @@ const ensureDirectory = (dirPath) => {
   return dirPath;
 };
 
+const expandHomePath = (value) => {
+  if (!value) return value;
+  return value.replace(/^~(?=$|[\\/])/, os.homedir());
+};
+
+const resolveConfiguredDirectory = (configuredPath, fallbackPath, basePath = null) => {
+  if (!configuredPath) {
+    return fallbackPath;
+  }
+
+  const expandedPath = expandHomePath(configuredPath.trim());
+  if (!expandedPath) {
+    return fallbackPath;
+  }
+
+  if (path.isAbsolute(expandedPath)) {
+    return expandedPath;
+  }
+
+  return path.join(basePath || process.cwd(), expandedPath);
+};
+
 const getAppStoragePaths = () => {
-  const rootPath = ensureDirectory(path.join(app.getPath("userData"), "storage"));
-  const recordingsPath = ensureDirectory(path.join(rootPath, "recordings"));
-  const transcriptsPath = ensureDirectory(path.join(rootPath, "transcripts"));
+  const defaultRootPath = path.join(os.homedir(), "Documents", "Meetlify");
+  const rootPath = ensureDirectory(resolveConfiguredDirectory(process.env.MEETLIFY_STORAGE_ROOT, defaultRootPath));
+  const recordingsPath = ensureDirectory(resolveConfiguredDirectory(process.env.MEETLIFY_RECORDINGS_DIR, path.join(rootPath, "Recordings"), rootPath));
+  const transcriptsPath = ensureDirectory(resolveConfiguredDirectory(process.env.MEETLIFY_TRANSCRIPTS_DIR, path.join(rootPath, "Transcripts"), rootPath));
 
   return {
     rootPath,

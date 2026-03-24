@@ -2,6 +2,12 @@
 
 Meetlify is a macOS desktop transcription app built with Electron and Swift. It records system audio and optional microphone input into a single FLAC file, lets you review recordings inside the app, sends recordings to Gemini for diarized transcription, and stores editable transcript markdown in a dedicated app data folder.
 
+The project is now set up so a new user can understand the important folders quickly:
+
+- source code stays in the repo
+- user recordings and transcripts default to visible folders in `~/Documents/Meetlify`
+- packaged builds are copied to the parent `MeetingTranscriber` folder as `Meetlify.app`
+
 ## What It Does
 
 - Captures system audio on macOS using the bundled Swift recorder.
@@ -9,9 +15,12 @@ Meetlify is a macOS desktop transcription app built with Electron and Swift. It 
 - Shows live system and mic level meters while recording.
 - Stores recordings and transcripts in the app support directory instead of scattering files across the project.
 - Provides an in-app player for previously recorded sessions.
+- Exports selected recordings as MP3.
+- Optionally splits MP3 exports into AI-upload-friendly chunks under 90 MB each.
 - Generates diarized transcripts with Gemini.
 - Opens transcripts in a built-in markdown editor with search, replace, preview, and save.
 - Exposes tray controls for opening the app and starting or stopping recording.
+- Uses a square `M` menu bar icon instead of the old generic tray asset.
 
 ## Tech Stack
 
@@ -30,12 +39,16 @@ Meetlify is a macOS desktop transcription app built with Electron and Swift. It 
   Fallback screen shown when screen recording permission is unavailable.
 - `src/electron/utils/recording.js`
   Recorder process lifecycle, stdout parsing, device listing, recording state events.
+- `src/electron/utils/export.js`
+  MP3 export and optional chunked export for AI chatbot upload workflows.
 - `src/electron/utils/gemini.js`
   Gemini upload, transcript generation, metadata generation, transcript shaping.
 - `src/electron/utils/playback.js`
   Generates WAV previews from FLAC recordings for the embedded player.
 - `src/electron/utils/paths.js`
-  Application paths, storage directories, packaged recorder extraction.
+  Application paths and configurable user-facing storage directories.
+- `scripts/post-package.js`
+  Copies the packaged `.app` bundle into the parent `MeetingTranscriber` folder.
 - `src/swift/Recorder.swift`
   Native recorder implementation.
 - `assets/icon/`
@@ -47,6 +60,7 @@ Meetlify is a macOS desktop transcription app built with Electron and Swift. It 
 - Node.js and npm.
 - Xcode command line tools.
 - A Gemini API key.
+- FFmpeg installed on the Mac for MP3 export.
 
 ## Installation
 
@@ -74,6 +88,37 @@ cp .env.example .env
 GEMINI_API_KEY=your_key_here
 ```
 
+## First-Time Configuration
+
+For a new user, the simplest setup is:
+
+1. Copy `.env.example` to `.env`
+2. Set `GEMINI_API_KEY`
+3. Keep the default storage root unless you want a different location
+4. Build the Swift recorder
+5. Start the app
+
+Configuration values supported in `.env`:
+
+- `GEMINI_API_KEY`
+  Required for transcript generation.
+- `MEETLIFY_STORAGE_ROOT`
+  Default root for user files. Defaults to `~/Documents/Meetlify`.
+- `MEETLIFY_RECORDINGS_DIR`
+  Recordings folder. Relative values are resolved inside `MEETLIFY_STORAGE_ROOT`.
+- `MEETLIFY_TRANSCRIPTS_DIR`
+  Transcripts folder. Relative values are resolved inside `MEETLIFY_STORAGE_ROOT`.
+- `MEETLIFY_MP3_BITRATE_KBPS`
+  MP3 export bitrate. Default is `96`.
+- `MEETLIFY_MP3_CHUNK_SIZE_MB`
+  Chunk size target for AI-upload exports. Default is `90`.
+
+Recommended default for most users:
+
+- recordings in `~/Documents/Meetlify/Recordings`
+- transcripts in `~/Documents/Meetlify/Transcripts`
+- packaged app at `/Users/jaronschurer/Coding/MeetingTranscriber/Meetlify.app`
+
 ## Development Run
 
 Start the app in development mode:
@@ -100,17 +145,20 @@ The packaged app is written to:
 
 - `out/Meetlify-darwin-arm64/Meetlify.app`
 
+After packaging, Meetlify also copies the app bundle to the parent workspace folder:
+
+- `/Users/jaronschurer/Coding/MeetingTranscriber/Meetlify.app`
+
 ## Application Storage
 
-Meetlify uses Electron's `app.getPath("userData")` as the base storage location.
+Meetlify now defaults to a visible user-facing storage location instead of burying files inside app support.
 
 Typical paths on macOS:
 
-- Recordings: `~/Library/Application Support/Meetlify/storage/recordings`
-- Transcripts: `~/Library/Application Support/Meetlify/storage/transcripts`
-- Extracted packaged recorder binary: `~/Library/Application Support/Meetlify/bin/Recorder`
+- Recordings: `~/Documents/Meetlify/Recordings`
+- Transcripts: `~/Documents/Meetlify/Transcripts`
 
-The exact location follows the active Electron app identity and packaging context.
+If you override the env config, those paths will change accordingly.
 
 ## Recording Workflow
 
@@ -121,9 +169,26 @@ The exact location follows the active Electron app identity and packaging contex
 5. Start recording.
 6. Stop recording when finished.
 7. Select the recording from the list.
-8. Process it with Gemini.
-9. Review and edit the transcript.
-10. Save the transcript markdown.
+8. Optionally export it as MP3.
+9. Enable chunking if you want files sized for AI chatbot uploads.
+10. Process it with Gemini.
+11. Review and edit the transcript.
+12. Save the transcript markdown.
+
+## MP3 Export Workflow
+
+When exporting a recording as MP3:
+
+- Meetlify converts the selected FLAC file to MP3 with FFmpeg.
+- The MP3 is written next to the original recording in the recordings folder.
+- If chunking is enabled, Meetlify creates a sibling folder named `<recording-name>-mp3-chunks`.
+- Chunked exports are sized with a safety margin so each file stays under the 90 MB upload target.
+
+Export file naming:
+
+- Single export: `meeting-name.mp3`
+- Chunked export folder: `meeting-name-mp3-chunks/`
+- Chunk files: `meeting-name.part001.mp3`, `meeting-name.part002.mp3`, and so on
 
 ## Transcript Workflow
 
@@ -186,6 +251,7 @@ macOS settings locations:
 - Transcripts folder display and open action.
 - Permission check actions.
 - Live audio level meters.
+- Overflow-safe path cards so long folder paths stay inside the UI cards.
 
 ### Recordings Section
 
@@ -193,6 +259,8 @@ macOS settings locations:
 - Shows file metadata.
 - Prepares a playback preview automatically when needed.
 - Lets you choose the Gemini model before processing.
+- Lets you export recordings as MP3.
+- Lets you split MP3 exports into AI-upload-sized chunks.
 
 ### Transcript Editor
 
@@ -272,6 +340,27 @@ Check:
 - `GEMINI_API_KEY` is present in `.env`
 - network access is available
 - the selected recording is valid and non-empty
+
+### MP3 Export Fails
+
+Check:
+
+- FFmpeg is installed and available at `/opt/homebrew/bin/ffmpeg`, `/usr/local/bin/ffmpeg`, or in `PATH`
+- the selected recording is valid and non-empty
+- the recordings directory is writable
+
+### I Cannot Find My Files
+
+By default, look here:
+
+- `~/Documents/Meetlify/Recordings`
+- `~/Documents/Meetlify/Transcripts`
+
+If those are not the right folders, check your `.env` overrides for:
+
+- `MEETLIFY_STORAGE_ROOT`
+- `MEETLIFY_RECORDINGS_DIR`
+- `MEETLIFY_TRANSCRIPTS_DIR`
 
 ### Tray Icon or Menu Looks Stale
 

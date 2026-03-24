@@ -90,6 +90,12 @@
         border-radius: 0.6rem;
         accent-color: #0ea5e9;
       }
+
+      .wrap-safe {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
     </style>
   </head>
   <body class="min-h-screen">
@@ -101,14 +107,14 @@
             <button id="recording-toggle" class="record-button">Start</button>
             <div id="recording-state-label" class="text-sm font-medium text-slate-700">Ready to record</div>
             <div class="text-sm text-slate-600">Elapsed: <span id="elapsed-time">0s</span></div>
-            <button id="output-file-path" class="text-center text-sm text-sky-700 hover:underline">Start recording to see the file path</button>
+            <button id="output-file-path" class="wrap-safe w-full text-center text-sm text-sky-700 hover:underline">Start recording to see the file path</button>
           </div>
         </div>
 
         <div class="glass-card rounded-2xl p-5 shadow-sm lg:col-span-2">
           <h2 class="text-lg font-semibold">Recording Setup</h2>
           <div class="mt-4 grid gap-4 md:grid-cols-2">
-            <div>
+            <div class="min-w-0">
               <label for="recording-filename" class="mb-2 block text-sm font-medium">Filename</label>
               <div class="flex gap-2">
                 <input type="text" id="recording-filename" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="team-sync-2026-02-17" />
@@ -116,22 +122,22 @@
               </div>
             </div>
 
-            <div>
+            <div class="min-w-0">
               <label for="microphone-select" class="mb-2 block text-sm font-medium">Microphone</label>
               <select id="microphone-select" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                 <option value="">No microphone</option>
               </select>
             </div>
 
-            <div>
+            <div class="min-w-0">
               <label class="mb-2 block text-sm font-medium">Recordings Folder</label>
-              <div id="selected-folder-path" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"></div>
+              <div id="selected-folder-path" class="wrap-safe min-h-[2.5rem] rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"></div>
               <button id="select-folder" class="mt-2 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Open Recordings Folder</button>
             </div>
 
-            <div>
+            <div class="min-w-0">
               <label class="mb-2 block text-sm font-medium">Transcripts Folder</label>
-              <div id="selected-transcripts-path" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"></div>
+              <div id="selected-transcripts-path" class="wrap-safe min-h-[2.5rem] rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"></div>
               <button id="open-transcript-folder" class="mt-2 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" disabled>
                 Open Transcript Folder
               </button>
@@ -173,7 +179,7 @@
 
       <section class="glass-card rounded-2xl p-5 shadow-sm">
         <div class="grid gap-4 lg:grid-cols-3">
-          <div class="lg:col-span-2">
+          <div class="min-w-0 lg:col-span-2">
             <label for="recording-select" class="mb-2 block text-sm font-medium">Recordings</label>
             <div class="flex gap-2">
               <select id="recording-select" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
@@ -181,10 +187,10 @@
               </select>
               <button id="refresh-recordings" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Refresh</button>
             </div>
-            <div id="recording-meta" class="mt-2 text-sm text-slate-600"></div>
+            <div id="recording-meta" class="wrap-safe mt-2 text-sm text-slate-600"></div>
           </div>
 
-          <div>
+          <div class="min-w-0">
             <label class="mb-2 block text-sm font-medium">Gemini Processing</label>
             <div class="flex items-center gap-2">
               <select id="model-select" class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm">
@@ -195,13 +201,25 @@
                 Process
               </button>
             </div>
+
+            <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+              <label class="mb-2 block text-sm font-medium">MP3 Export</label>
+              <button id="export-mp3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-white disabled:cursor-not-allowed disabled:opacity-50">
+                Download MP3
+              </button>
+              <label for="chunk-mp3" class="mt-3 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input id="chunk-mp3" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" />
+                Chunk into &lt;= 90 MB pieces for AI uploads
+              </label>
+              <p class="mt-2 text-xs text-slate-500">Exports the selected FLAC recording as MP3 in the recordings folder. Chunked exports are written into a sibling folder.</p>
+            </div>
           </div>
         </div>
 
         <div class="player-shell mt-4">
           <audio id="recording-player" controls preload="metadata"></audio>
         </div>
-        <div id="processing-status" class="mt-3 text-sm text-slate-600">Idle</div>
+        <div id="processing-status" class="wrap-safe mt-3 text-sm text-slate-600">Idle</div>
       </section>
 
       <section class="glass-card rounded-2xl p-5 shadow-sm">

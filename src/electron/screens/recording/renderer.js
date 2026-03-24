@@ -39,6 +39,8 @@ const micLevelFillEl = document.getElementById("mic-level-fill");
 const recordingPlayerEl = document.getElementById("recording-player");
 const saveMarkdownEl = document.getElementById("save-markdown");
 const openTranscriptFolderEl = document.getElementById("open-transcript-folder");
+const exportMp3El = document.getElementById("export-mp3");
+const chunkMp3El = document.getElementById("chunk-mp3");
 const searchInputEl = document.getElementById("search-input");
 const replaceInputEl = document.getElementById("replace-input");
 const checkPermissionsEl = document.getElementById("check-permissions");
@@ -134,6 +136,12 @@ const setProcessing = (isProcessing, label) => {
   processingStatusEl.textContent = label;
 };
 
+const setExporting = (isExporting, label) => {
+  exportMp3El.disabled = isExporting;
+  chunkMp3El.disabled = isExporting;
+  processingStatusEl.textContent = label;
+};
+
 const renderPreview = () => {
   const markdown = markdownEditorEl.value || "";
 
@@ -150,9 +158,66 @@ const formatSize = (sizeBytes) => {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+const normalizeMicrophoneName = (name) => {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return "";
+
+  return trimmed
+    .replace(/^(default|standard)\s*[-:]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const getRendererMicrophones = async () => {
+  if (!navigator.mediaDevices?.enumerateDevices || !navigator.mediaDevices?.getUserMedia) {
+    return [];
+  }
+
+  let stream = null;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaDevices = await navigator.mediaDevices.enumerateDevices();
+    const dedupedDevices = new Map();
+
+    mediaDevices
+      .filter((device) => device.kind === "audioinput")
+      .forEach((device) => {
+        const rawName = (device.label || "").trim();
+        const normalizedName = normalizeMicrophoneName(rawName) || "Microphone";
+        const dedupeKey = normalizedName.toLowerCase();
+        const existing = dedupedDevices.get(dedupeKey);
+        const nextDevice = {
+          id: rawName || device.deviceId,
+          name: normalizedName,
+          isDefault: device.deviceId === "default",
+        };
+
+        if (!existing) {
+          dedupedDevices.set(dedupeKey, nextDevice);
+          return;
+        }
+
+        dedupedDevices.set(dedupeKey, {
+          id: existing.isDefault ? existing.id : nextDevice.id,
+          name: existing.name,
+          isDefault: existing.isDefault || nextDevice.isDefault,
+        });
+      });
+
+    return Array.from(dedupedDevices.values());
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+};
+
 const refreshMicrophones = async () => {
   try {
-    const devices = await ipcRenderer.invoke("list-input-devices");
+    let devices = await getRendererMicrophones();
+    if (!devices.length) {
+      devices = await ipcRenderer.invoke("list-input-devices");
+    }
+
     microphoneSelectEl.innerHTML = "";
 
     const noMicOption = document.createElement("option");
@@ -555,6 +620,34 @@ document.getElementById("process-recording").addEventListener("click", async () 
     setProcessing(false, `Transcript ready: ${path.basename(transcriptPath)}`);
   } catch (error) {
     setProcessing(false, `Processing failed: ${error.message}`);
+  }
+});
+
+exportMp3El.addEventListener("click", async () => {
+  const selectedPath = recordingSelectEl.value;
+  const shouldChunk = chunkMp3El.checked;
+
+  if (!selectedPath) {
+    setExporting(false, "Select a recording first.");
+    return;
+  }
+
+  setExporting(true, shouldChunk ? "Exporting MP3 chunks..." : "Exporting MP3...");
+
+  try {
+    const result = await ipcRenderer.invoke("export-recording-mp3", {
+      filePath: selectedPath,
+      chunked: shouldChunk,
+    });
+
+    if (result.chunked) {
+      setExporting(false, `MP3 chunks ready: ${result.fileCount} files in ${path.basename(result.outputDirectory)}`);
+      return;
+    }
+
+    setExporting(false, `MP3 ready: ${path.basename(result.outputPath)}`);
+  } catch (error) {
+    setExporting(false, `MP3 export failed: ${error.message}`);
   }
 });
 

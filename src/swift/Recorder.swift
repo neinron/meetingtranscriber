@@ -130,7 +130,11 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
                 return AVCaptureDevice.default(for: .audio)
             }
 
-            return Self.audioCaptureDevices().first { $0.uniqueID == micDeviceID }
+            return Self.audioCaptureDevices().first {
+                $0.uniqueID == micDeviceID
+                || $0.localizedName == micDeviceID
+                || $0.localizedName.caseInsensitiveCompare(micDeviceID) == .orderedSame
+            }
         }()
 
         guard let micDevice = selectedDevice else {
