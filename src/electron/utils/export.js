@@ -9,6 +9,7 @@ const readPositiveInteger = (value, fallbackValue) => {
 };
 
 const MP3_BITRATE_KBPS = readPositiveInteger(process.env.MEETLIFY_MP3_BITRATE_KBPS, 96);
+const MP3_BITRATE = `${MP3_BITRATE_KBPS}k`;
 const MP3_CHUNK_SIZE_MB = readPositiveInteger(process.env.MEETLIFY_MP3_CHUNK_SIZE_MB, 90);
 const MP3_CHUNK_TARGET_BYTES = Math.max(1, MP3_CHUNK_SIZE_MB - 2) * 1024 * 1024;
 const MP3_CHUNK_DURATION_SECONDS = Math.max(60, Math.floor((MP3_CHUNK_TARGET_BYTES * 8) / (MP3_BITRATE_KBPS * 1000)));
