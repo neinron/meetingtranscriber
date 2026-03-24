@@ -115,6 +115,24 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
+      .setup-grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .filename-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .meter-grid {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
       .utility-card {
         border: 1px solid rgba(191, 219, 254, 0.85);
         border-radius: 1rem;
@@ -124,6 +142,23 @@
 
       .player-shell.is-empty {
         opacity: 0.65;
+      }
+
+      @media (min-width: 640px) {
+        .filename-row {
+          flex-direction: row;
+          align-items: stretch;
+        }
+      }
+
+      @media (min-width: 1180px) {
+        .setup-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .meter-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       @media (max-width: 1023px) {
@@ -148,10 +183,10 @@
 
         <div class="glass-card rounded-2xl p-5 shadow-sm lg:col-span-2">
           <h2 class="text-lg font-semibold">Recording Setup</h2>
-          <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <div class="setup-grid mt-4">
             <div class="min-w-0">
               <label for="recording-filename" class="mb-2 block text-sm font-medium">Filename</label>
-              <div class="flex gap-2">
+              <div class="filename-row">
                 <input type="text" id="recording-filename" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="team-sync-2026-02-17" />
                 <span class="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">.flac</span>
               </div>
@@ -178,7 +213,7 @@
               </button>
             </div>
 
-            <div class="md:col-span-2">
+            <div class="xl:col-span-2">
               <label class="mb-2 block text-sm font-medium">Permissions</label>
               <div class="flex flex-wrap gap-2">
                 <button id="check-permissions" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
@@ -191,8 +226,8 @@
               <p class="mt-2 text-xs text-slate-500">Use this to trigger macOS permission prompts (Screen Recording + Microphone).</p>
             </div>
 
-            <div class="md:col-span-2">
-              <div class="grid gap-3 md:grid-cols-2">
+            <div class="xl:col-span-2">
+              <div class="meter-grid">
                 <div>
                   <div class="mb-1 text-sm font-medium">System Audio Level</div>
                   <div class="h-3 overflow-hidden rounded-full bg-slate-200">

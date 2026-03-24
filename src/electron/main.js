@@ -263,10 +263,10 @@ const safeLoadScreen = async (screenPath) => {
 
 const createWindow = async () => {
   global.mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 880,
-    minWidth: 980,
-    minHeight: 740,
+    width: 980,
+    height: 760,
+    minWidth: 760,
+    minHeight: 680,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
