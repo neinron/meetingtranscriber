@@ -15,6 +15,7 @@ const { exportRecordingToMp3 } = require("./utils/export");
 const isDev = !app.isPackaged;
 let tray = null;
 let trayTickTimer = null;
+let isQuitting = false;
 let lastStartOptions = { filename: "", micDeviceId: null };
 const trayState = {
   isRecording: false,
@@ -254,6 +255,19 @@ const setupTray = () => {
   updateTrayMenu();
 };
 
+const destroyTray = () => {
+  setTrayTicking(false);
+  if (!tray) return;
+
+  try {
+    tray.destroy();
+  } catch (error) {
+    logError("tray-destroy", error);
+  } finally {
+    tray = null;
+  }
+};
+
 const safeLoadScreen = async (screenPath) => {
   try {
     await global.mainWindow.loadFile(screenPath);
@@ -278,6 +292,16 @@ const createWindow = async () => {
 
   global.mainWindow.on("unresponsive", () => {
     logError("browser-window", new Error("Main window became unresponsive"));
+  });
+
+  global.mainWindow.on("close", (event) => {
+    if (isQuitting) {
+      return;
+    }
+
+    isQuitting = true;
+    event.preventDefault();
+    app.quit();
   });
 
   global.mainWindow.on("closed", () => {
@@ -498,15 +522,15 @@ process.on("unhandledRejection", (reason) => {
 });
 
 app.on("before-quit", () => {
-  setTrayTicking(false);
+  isQuitting = true;
   stopRecording();
+  destroyTray();
 });
 
 app.on("window-all-closed", () => {
   stopRecording();
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  destroyTray();
+  app.quit();
 });
 
 app.whenReady().then(createWindow).catch((error) => {
