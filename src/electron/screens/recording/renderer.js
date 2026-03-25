@@ -56,6 +56,9 @@ const replaceInputEl = document.getElementById("replace-input");
 const checkPermissionsEl = document.getElementById("check-permissions");
 const requestMicPermissionEl = document.getElementById("request-mic-permission");
 const recordingFilenameEl = document.getElementById("recording-filename");
+const geminiApiKeyEl = document.getElementById("gemini-api-key");
+const saveGeminiApiKeyEl = document.getElementById("save-gemini-api-key");
+const geminiApiKeyStatusEl = document.getElementById("gemini-api-key-status");
 
 const getDefaultMeetingFilename = () => {
   const now = new Date();
@@ -158,6 +161,20 @@ const setExporting = (isExporting, label) => {
   exportMp3El.disabled = isExporting;
   chunkMp3El.disabled = isExporting;
   processingStatusEl.textContent = label;
+};
+
+const setGeminiApiKeyStatus = (settings) => {
+  if (!settings?.hasApiKey) {
+    geminiApiKeyStatusEl.textContent = "No Gemini API key saved yet.";
+    return;
+  }
+
+  if (settings.source === "env") {
+    geminiApiKeyStatusEl.textContent = "Gemini API key loaded from environment.";
+    return;
+  }
+
+  geminiApiKeyStatusEl.textContent = `Gemini API key saved in app settings at ${settings.settingsPath}`;
 };
 
 const setRecordingSelectionUi = (recording) => {
@@ -677,6 +694,28 @@ requestMicPermissionEl.addEventListener("click", async () => {
   }
 });
 
+saveGeminiApiKeyEl.addEventListener("click", async () => {
+  const apiKey = geminiApiKeyEl.value.trim();
+
+  if (!apiKey) {
+    geminiApiKeyStatusEl.textContent = "Enter a Gemini API key first.";
+    return;
+  }
+
+  saveGeminiApiKeyEl.disabled = true;
+
+  try {
+    const settings = await ipcRenderer.invoke("save-gemini-api-key", { apiKey });
+    geminiApiKeyEl.value = "";
+    setGeminiApiKeyStatus(settings);
+    processingStatusEl.textContent = "Gemini API key saved.";
+  } catch (error) {
+    geminiApiKeyStatusEl.textContent = `Could not save Gemini API key: ${error.message}`;
+  } finally {
+    saveGeminiApiKeyEl.disabled = false;
+  }
+});
+
 recordingFilenameEl.addEventListener("input", (event) => {
   recordingFilename = event.target.value;
 });
@@ -859,11 +898,13 @@ markdownEditorEl.addEventListener("input", () => {
 const init = async () => {
   try {
     const storagePaths = await ipcRenderer.invoke("get-storage-paths");
+    const geminiSettings = await ipcRenderer.invoke("get-gemini-settings");
     selectedFolderPath = storagePaths.recordingsPath;
     transcriptsFolderPath = storagePaths.transcriptsPath;
     selectedFolderPathEl.textContent = selectedFolderPath;
     selectedTranscriptsPathEl.textContent = transcriptsFolderPath;
     openTranscriptFolderEl.disabled = false;
+    setGeminiApiKeyStatus(geminiSettings);
 
     recordingFilename = getDefaultMeetingFilename();
     recordingFilenameEl.value = recordingFilename;

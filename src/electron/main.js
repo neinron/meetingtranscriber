@@ -6,6 +6,7 @@ loadEnv();
 const { startRecording, stopRecording, listInputDevices, setRecordingObservers } = require("./utils/recording");
 const { listRecordings } = require("./utils/recordings");
 const { processRecordingWithGemini } = require("./utils/gemini");
+const { getGeminiSettingsSummary, saveGeminiApiKey } = require("./utils/settings");
 const { getTranscriptPathForRecording, readMarkdown, saveMarkdown } = require("./utils/markdown");
 const { getPermissionDeniedScreenPath, getRecordingScreenPath, getAppStoragePaths } = require("./utils/paths");
 const { ensurePlaybackPreview } = require("./utils/playback");
@@ -358,6 +359,14 @@ ipcMain.on("stop-recording", () => {
 
 ipcMain.handle("get-storage-paths", async () => {
   return getStoragePaths();
+});
+
+ipcMain.handle("get-gemini-settings", async () => {
+  return getGeminiSettingsSummary();
+});
+
+ipcMain.handle("save-gemini-api-key", async (_, { apiKey }) => {
+  return saveGeminiApiKey(apiKey);
 });
 
 ipcMain.handle("list-recordings", async () => {

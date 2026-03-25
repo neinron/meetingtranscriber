@@ -227,6 +227,24 @@
             </div>
 
             <div class="xl:col-span-2">
+              <label for="gemini-api-key" class="mb-2 block text-sm font-medium">Gemini API Key</label>
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="password"
+                  id="gemini-api-key"
+                  class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="Paste your Gemini API key"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button id="save-gemini-api-key" class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">
+                  Save Key
+                </button>
+              </div>
+              <p id="gemini-api-key-status" class="mt-2 text-xs text-slate-500">No Gemini API key saved yet.</p>
+            </div>
+
+            <div class="xl:col-span-2">
               <div class="meter-grid">
                 <div>
                   <div class="mb-1 text-sm font-medium">System Audio Level</div>

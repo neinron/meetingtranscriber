@@ -70,6 +70,12 @@ The packaged app bundle is also copied to:
 - If microphone capture is enabled, macOS will also ask for Microphone permission.
 - Transcripts are generated with Gemini models only.
 
+## Attribution
+
+This app includes Swift recording code derived from work by Luke Lucas (`O4FDev`), used under the MIT License.
+
+Copyright (c) 2024 Luke Lucas
+
 ## Changes
 
 - Renamed the app source folder from `electron-system-audio-recorder` to `meetlify`.

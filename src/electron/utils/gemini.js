@@ -1,5 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { getGeminiApiKey } = require("./settings");
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
 const DEFAULT_MODEL = "gemini-2.5-flash";
@@ -65,10 +66,10 @@ const smoothDiarizedTranscript = (markdown) => {
 };
 
 const getApiKey = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
     const envPath = process.env.GEMINI_ENV_PATH || ".env";
-    throw new Error(`Missing GEMINI_API_KEY. Set it in ${envPath} and restart the app.`);
+    throw new Error(`Missing Gemini API key. Add it in the app settings or set GEMINI_API_KEY in ${envPath}.`);
   }
 
   return apiKey;
