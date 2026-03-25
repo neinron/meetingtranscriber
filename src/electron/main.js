@@ -215,8 +215,8 @@ const setTrayTicking = (enabled) => {
 const getTrayIcon = () => {
   const traySvg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
-      <rect x="2" y="2" width="14" height="14" rx="2.2" fill="none" stroke="black" stroke-width="1.6"/>
-      <path d="M5.1 12.8V5.2h1.5l2.35 3.5 2.36-3.5h1.53v7.6h-1.39V7.61L8.95 11.2 6.49 7.61v5.19z" fill="black"/>
+      <path d="M9 2.4a2.7 2.7 0 0 0-2.7 2.7v3.8A2.7 2.7 0 0 0 9 11.6a2.7 2.7 0 0 0 2.7-2.7V5.1A2.7 2.7 0 0 0 9 2.4z" fill="black"/>
+      <path d="M4.7 8.4a.8.8 0 0 1 .8.8 3.5 3.5 0 0 0 7 0 .8.8 0 0 1 1.6 0A5.1 5.1 0 0 1 9.8 14v1.4h2a.8.8 0 0 1 0 1.6H6.2a.8.8 0 0 1 0-1.6h2V14A5.1 5.1 0 0 1 3.9 9.2a.8.8 0 0 1 .8-.8z" fill="black"/>
     </svg>
   `.trim();
   const image = nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(traySvg)}`);
