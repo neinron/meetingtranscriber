@@ -473,7 +473,7 @@ const setAudioLevels = (systemLevel = 0, micLevel = 0) => {
 
 const refreshDisplayedAudioLevels = () => {
   const systemLevel = isRecording ? recorderSystemLevel : 0;
-  const micLevel = isRecording ? Math.max(recorderMicLevel, liveMicLevel) : liveMicLevel;
+  const micLevel = isRecording ? recorderMicLevel : liveMicLevel;
   setAudioLevels(systemLevel, micLevel);
 };
 

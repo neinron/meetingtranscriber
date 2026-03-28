@@ -163,9 +163,27 @@ const getDefaultFilename = () => {
   return `Meeting_Recording-${dd}${mm}${yyyy}-${hh}${min}`;
 };
 
+const syncDockVisibility = () => {
+  if (process.platform !== "darwin" || !app.dock) {
+    return;
+  }
+
+  const shouldShowDock = Boolean(global.mainWindow && !global.mainWindow.isDestroyed() && global.mainWindow.isVisible());
+  try {
+    if (shouldShowDock) {
+      app.dock.show();
+    } else {
+      app.dock.hide();
+    }
+  } catch (error) {
+    logError("sync-dock-visibility", error);
+  }
+};
+
 const openMainWindow = async () => {
   if (!global.mainWindow || global.mainWindow.isDestroyed()) {
     await createWindow();
+    syncDockVisibility();
     return;
   }
 
@@ -175,12 +193,14 @@ const openMainWindow = async () => {
 
   global.mainWindow.show();
   global.mainWindow.focus();
+  syncDockVisibility();
 };
 
 const updateTrayMenu = () => {
   if (!tray) return;
 
   const totalLevel = Math.min(1, (trayState.systemLevel || 0) + (trayState.micLevel || 0));
+  const liveLength = formatDuration(trayState.startedAtMs);
   const template = [
     {
       label: "Open Meetlify",
@@ -205,8 +225,8 @@ const updateTrayMenu = () => {
       label: `Levels (S/M/T): ${toPercent(trayState.systemLevel)} / ${toPercent(trayState.micLevel)} / ${toPercent(totalLevel)}`,
       enabled: false,
     },
-    { label: `Recording: ${trayState.recordingName || "-"}`, enabled: false },
-    { label: `Length: ${formatDuration(trayState.startedAtMs)}`, enabled: false },
+    { label: `Meeting: ${trayState.recordingName || "-"}`, enabled: false },
+    { label: `Length: ${liveLength}`, enabled: false },
     { type: "separator" },
     {
       label: "Stop Meetlify",
@@ -327,6 +347,7 @@ const createWindow = async () => {
     height: 860,
     minWidth: 860,
     minHeight: 720,
+    show: false,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -345,11 +366,27 @@ const createWindow = async () => {
     }
 
     event.preventDefault();
-    global.mainWindow.hide();
+    isQuitting = true;
+    stopRecordingForShutdown();
+    destroyTray();
+    app.quit();
+  });
+
+  global.mainWindow.on("show", () => {
+    syncDockVisibility();
+  });
+
+  global.mainWindow.on("hide", () => {
+    syncDockVisibility();
+  });
+
+  global.mainWindow.on("minimize", () => {
+    syncDockVisibility();
   });
 
   global.mainWindow.on("closed", () => {
     global.mainWindow = null;
+    syncDockVisibility();
   });
 
   try {
@@ -357,18 +394,22 @@ const createWindow = async () => {
 
     if (isPermissionGranted) {
       await safeLoadScreen(getRecordingScreenPath());
-      global.mainWindow.webContents.once("did-finish-load", () => {
-        requestMicrophonePermissionIfNeeded().catch((error) => {
-          logError("startup-microphone-permission", error);
-        });
-      });
+      global.mainWindow.show();
     } else {
       await safeLoadScreen(getPermissionDeniedScreenPath());
+      global.mainWindow.show();
     }
   } catch (error) {
     logError("startup-permissions", error);
     await safeLoadScreen(getPermissionDeniedScreenPath());
+    global.mainWindow.show();
   }
+
+  syncDockVisibility();
+
+  requestMicrophonePermissionIfNeeded().catch((error) => {
+    logError("startup-microphone-permission", error);
+  });
 };
 
 const startRecordingFromTray = async () => {
@@ -740,6 +781,7 @@ setRecordingObservers({
 app.whenReady().then(async () => {
   setupTray();
   await createWindow();
+  syncDockVisibility();
 }).catch((error) => {
   logError("app-ready", error);
 });

@@ -1,6 +1,7 @@
-                                                                                                import AVFoundation
+import AVFoundation
 import ScreenCaptureKit
 
+import AppKit
 import Foundation
 import CoreMedia
 
@@ -126,12 +127,19 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     }
 
     func executeRecordingProcess() {
+        configureBackgroundActivationPolicy()
         setupInterruptSignalHandler()
         setupStartupTimeout()
         DispatchQueue.main.async { [weak self] in
             self?.updateAvailableContent()
         }
         RunLoop.main.run()
+    }
+
+    func configureBackgroundActivationPolicy() {
+        DispatchQueue.main.async {
+            NSApplication.shared.setActivationPolicy(.prohibited)
+        }
     }
 
     // MARK: Microphone Capture

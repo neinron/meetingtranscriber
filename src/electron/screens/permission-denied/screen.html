@@ -8,10 +8,22 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
-<body class="bg-gray-100 h-screen flex items-center justify-center">
-  <div class="bg-white shadow-md rounded-md p-6 max-w-md mx-auto text-center">
-    <h1 class="text-3xl font-bold text-red-600 mb-4">Permission Denied</h1>
-    <p class="mb-6 text-lg text-gray-700">Meetlify needs the required macOS recording permissions before it can capture your meeting audio.</p>
+<body class="bg-gray-100 h-screen flex items-center justify-center px-6">
+  <div class="bg-white shadow-md rounded-md p-6 max-w-xl mx-auto text-center">
+    <h1 class="text-3xl font-bold text-red-600 mb-4">Permissions Required</h1>
+    <p class="mb-4 text-lg text-gray-700">Meetlify needs macOS recording permissions before it can capture system audio and microphone input.</p>
+    <div class="text-left bg-gray-50 border border-gray-200 rounded-md p-4 mb-6 text-sm text-gray-700 leading-6">
+      <p class="font-semibold text-gray-900 mb-2">How to enable access</p>
+      <ol class="list-decimal pl-5 space-y-1">
+        <li>Open <span class="font-medium">System Settings</span>.</li>
+        <li>Go to <span class="font-medium">Privacy &amp; Security</span>.</li>
+        <li>Open <span class="font-medium">Screen Recording</span>.</li>
+        <li>If Meetlify is not listed yet, click the <span class="font-medium">+</span> button and add <span class="font-medium">Meetlify.app</span> from your <span class="font-medium">Applications</span> folder.</li>
+        <li>Enable <span class="font-medium">Meetlify</span> in <span class="font-medium">Screen Recording</span>.</li>
+        <li>Open <span class="font-medium">Microphone</span> and enable <span class="font-medium">Meetlify</span> there too if you want mic recording.</li>
+        <li>Quit and reopen Meetlify after changing permissions.</li>
+      </ol>
+    </div>
     <button id="check-permissions"
       class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-md transition-colors duration-150 ease-in-out">
       Check Permissions Again
