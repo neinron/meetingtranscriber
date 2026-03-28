@@ -24,7 +24,7 @@ const {
   setRecordingObservers,
   getRecordingSnapshot,
 } = require("./utils/recording");
-const { listRecordings } = require("./utils/recordings");
+const { listRecordings, updateRecordingTranscriptPath } = require("./utils/recordings");
 const { processRecordingWithGemini } = require("./utils/gemini");
 const { getGeminiSettingsSummary, saveGeminiApiKey, saveTranscriptionPrompt, getUiDisclosureState, saveUiDisclosureState, getThemeMode, saveThemeMode } = require("./utils/settings");
 const { getTranscriptPathForRecording, readMarkdown, saveMarkdown } = require("./utils/markdown");
@@ -513,11 +513,17 @@ ipcMain.handle("get-microphone-permission-status", async () => ({
 }));
 
 ipcMain.handle("process-recording", async (_, { filePath, model, transcriptPath: requestedTranscriptPath }) => {
-  const { transcriptsPath } = getStoragePaths();
+  const { recordingsPath, transcriptsPath } = getStoragePaths();
   const markdown = await processRecordingWithGemini({ filePath, model });
   const transcriptPath = requestedTranscriptPath || getTranscriptPathForRecording(filePath, transcriptsPath);
 
   await saveMarkdown(transcriptPath, markdown);
+  await updateRecordingTranscriptPath({
+    recordingsFolderPath: recordingsPath,
+    transcriptsFolderPath: transcriptsPath,
+    audioPath: filePath,
+    transcriptPath,
+  });
 
   return {
     transcriptPath,
@@ -533,13 +539,36 @@ ipcMain.handle("export-recording-mp3", async (_, { filePath, chunked }) => {
 });
 
 ipcMain.handle("load-markdown", async (_, markdownPath) => {
-  const content = await readMarkdown(markdownPath);
-  return { content };
+  try {
+    const content = await readMarkdown(markdownPath);
+    return { content, missing: false };
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { content: "", missing: true };
+    }
+    throw error;
+  }
 });
 
-ipcMain.handle("save-markdown", async (_, { markdownPath, content }) => {
-  await saveMarkdown(markdownPath, content);
-  return { ok: true };
+ipcMain.handle("save-markdown", async (_, { markdownPath, content, filePath }) => {
+  const { recordingsPath, transcriptsPath } = getStoragePaths();
+  let resolvedMarkdownPath = markdownPath;
+
+  if (!resolvedMarkdownPath) {
+    if (!filePath) {
+      throw new Error("Missing transcript target.");
+    }
+    resolvedMarkdownPath = getTranscriptPathForRecording(filePath, transcriptsPath);
+    await updateRecordingTranscriptPath({
+      recordingsFolderPath: recordingsPath,
+      transcriptsFolderPath: transcriptsPath,
+      audioPath: filePath,
+      transcriptPath: resolvedMarkdownPath,
+    });
+  }
+
+  await saveMarkdown(resolvedMarkdownPath, content);
+  return { ok: true, transcriptPath: resolvedMarkdownPath };
 });
 
 ipcMain.handle("open-path", async (_, targetPath) => {

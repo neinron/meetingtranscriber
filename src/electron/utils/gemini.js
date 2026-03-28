@@ -9,13 +9,41 @@ const DESCRIPTION_PLACEHOLDER = "{description placeholder}";
 
 const buildPrompt = () => getTranscriptionPrompt();
 
+const createGeminiNoTextError = (message, context = {}) => {
+  const error = new Error(message);
+  error.code = "GEMINI_NO_TEXT";
+  Object.assign(error, context);
+  return error;
+};
+
+const collectTextFromValue = (value) => {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(collectTextFromValue);
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    if (key === "text" && typeof nestedValue === "string") {
+      return [nestedValue];
+    }
+    return collectTextFromValue(nestedValue);
+  });
+};
+
 const extractTextFromGenerateContentPayload = (payload) => {
   const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
 
   for (const candidate of candidates) {
     const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
     const text = parts
-      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .flatMap((part) => collectTextFromValue(part))
       .join("")
       .trim();
 
@@ -185,10 +213,15 @@ const requestTranscript = async ({ apiKey, model, fileUri, mimeType }) => {
       extracted.finishReason ? `finish reason: ${extracted.finishReason}` : "",
       extracted.safetyRatings ? `safety: ${extracted.safetyRatings}` : "",
     ].filter(Boolean);
-    throw new Error(
+    throw createGeminiNoTextError(
       reasons.length
         ? `Gemini transcript request returned no text (${reasons.join("; ")}).`
-        : "Gemini transcript request returned no text."
+        : "Gemini transcript request returned no text.",
+      {
+        model,
+        finishReason: extracted.finishReason || "",
+        blockReason: extracted.blockReason || "",
+      }
     );
   }
 
@@ -339,12 +372,28 @@ const processRecordingWithGemini = async ({ filePath, model = DEFAULT_TRANSCRIPT
   });
 
   try {
-    const transcriptRaw = await requestTranscript({
-      apiKey,
-      model,
-      fileUri: uploadedFile.uri,
-      mimeType,
-    });
+    let transcriptRaw;
+    try {
+      transcriptRaw = await requestTranscript({
+        apiKey,
+        model,
+        fileUri: uploadedFile.uri,
+        mimeType,
+      });
+    } catch (error) {
+      if (error?.code !== "GEMINI_NO_TEXT" || model === DEFAULT_TRANSCRIPTION_MODEL) {
+        throw error;
+      }
+
+      // Some preview / edge models can finish normally but still return no usable
+      // transcript text. Fall back once to the stable default model.
+      transcriptRaw = await requestTranscript({
+        apiKey,
+        model: DEFAULT_TRANSCRIPTION_MODEL,
+        fileUri: uploadedFile.uri,
+        mimeType,
+      });
+    }
 
     const transcript = smoothDiarizedTranscript(transcriptRaw).trim();
     const fileTitle = path.parse(filePath).name;

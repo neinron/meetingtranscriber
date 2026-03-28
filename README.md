@@ -1,27 +1,55 @@
 # Meetlify
 
-Meetlify is a macOS menu bar meeting transcription app. It captures system audio with optional microphone input, stores recordings in a visible `~/Documents/Meetlify` folder, and uses Gemini to generate diarized meeting transcripts and summary metadata.
+Meetlify is a macOS desktop app for recording meetings, reviewing recordings, generating transcripts with Gemini, and editing those transcripts as Markdown.
 
-The menu bar item is a microphone icon. From there you can open the app, start or stop recording, and monitor the current recording state.
+It is built with:
 
-## What The App Does
+- Electron for the desktop app shell
+- a bundled Swift recorder for system audio and optional microphone capture
+- Gemini for transcript generation
 
-- Records meeting audio on macOS through the bundled Swift recorder.
-- Supports optional microphone capture in the same session.
-- Stores recordings and transcripts in `~/Documents/Meetlify` by default.
-- Lets you review recordings inside the app.
-- Exports recordings to MP3.
-- Processes recordings with Gemini only.
-- Writes transcripts as editable Markdown files.
+The app is designed around three working modes:
+
+- `Recording Mode`
+- `Editing Mode`
+- `System Prompt Mode`
+
+## Features
+
+- Record macOS system audio
+- Optionally include microphone input in the same recording
+- Keep recording running when the app is hidden, minimized, or unfocused
+- Browse recordings in an in-app library
+- Play recordings inside the app
+- Generate transcripts with Gemini
+- Edit transcripts as Markdown with:
+  - undo / redo
+  - search / replace
+  - speaker relabeling
+  - live preview
+- Save transcripts manually from the editor
+- Export recordings to MP3 as:
+  - a single file
+  - chunked files
+- Edit the transcription system prompt from inside the app
+- Manage theme, permissions, API key, and storage folders from settings
+- Control recording from the menu bar
 
 ## Storage
 
-Default user-facing folders:
+By default Meetlify stores user files in:
 
 - `~/Documents/Meetlify/Recordings`
 - `~/Documents/Meetlify/Transcripts`
 
-You can override these with:
+Notes:
+
+- recordings and transcripts are managed internally with stable ids
+- a transcript file is only created when:
+  - you transcribe a recording
+  - or you manually save transcript content from the editor
+
+Optional environment overrides:
 
 - `MEETLIFY_STORAGE_ROOT`
 - `MEETLIFY_RECORDINGS_DIR`
@@ -32,53 +60,113 @@ You can override these with:
 - macOS with ScreenCaptureKit support
 - Node.js and npm
 - Xcode command line tools
-- FFmpeg for MP3 export
-- A Gemini API key
+- `ffmpeg`
+- a Gemini API key
+
+`ffmpeg` is used for:
+
+- MP3 export
+- final system + microphone mix when both inputs are recorded
 
 ## Setup
+
+Install dependencies and build the native recorder:
 
 ```bash
 npm install
 npm run swift:make
 ```
 
-Create `.env` and add:
+Provide a Gemini API key either through the app settings or through `.env`:
 
 ```env
 GEMINI_API_KEY=your_key_here
 ```
 
-Run in development:
+## Development
+
+Start the app in development mode:
 
 ```bash
 npm run electron:start
 ```
 
-Build the packaged app:
+Notes:
+
+- changes in renderer files such as `screen.html` and `renderer.js` usually only need a window reload
+- changes in `main.js` require a full app restart
+- changes in `src/swift/Recorder.swift` require:
+
+```bash
+npm run swift:make
+```
+
+and then a full app restart
+
+## Packaging
+
+Build a packaged app bundle:
 
 ```bash
 npm run electron:package
 ```
 
-The packaged app bundle is also copied to:
+This produces a runnable `.app` bundle in the local build output.
 
-- `/Users/jaronschurer/Coding/MeetingTranscriber/Meetlify.app`
+The repository still contains a universal `electron:make` script:
 
-## Notes
+```bash
+npm run electron:make
+```
 
-- Meetlify will ask for Screen Recording permission on first use.
-- If microphone capture is enabled, macOS will also ask for Microphone permission.
-- Transcripts are generated with Gemini models only.
+but in this project that flow may need extra packaging adjustments depending on the target architecture and bundled native recorder.
+
+## Permissions
+
+Meetlify needs:
+
+- `System Audio` / Screen Recording permission to capture macOS output audio
+- Microphone permission if microphone capture is enabled
+
+The app exposes permission actions in the settings panel.
+
+## Transcript Workflow
+
+When you transcribe a recording, Meetlify:
+
+1. uploads the selected audio file to Gemini
+2. requests a transcript
+3. saves the result as Markdown
+4. opens the result in the editor
+
+The generated transcript format includes:
+
+- the recording file name as the title
+- a date line with date, start time, and end time
+- transcript content in Markdown
+
+## UI Overview
+
+The app uses a custom desktop interface with:
+
+- a collapsible, resizable sidebar
+- a recording setup view
+- a review / editing workspace
+- a dedicated system-prompt editor
+- light, dark, and system theme modes
+
+## Menu Bar
+
+While Meetlify is running, the menu bar item can:
+
+- open the app
+- show recording state
+- stop or inspect an active recording
+
+When recording is active, the menu bar status updates live.
 
 ## Attribution
 
 This app includes Swift recording code derived from work by Luke Lucas (`O4FDev`), used under the MIT License.
 
 Copyright (c) 2024 Luke Lucas
-
-## Changes
-
-- Renamed the app source folder from `electron-system-audio-recorder` to `meetlify`.
-- Rewrote this README as a clean product description instead of a legacy implementation document.
-- Removed old “Electron system audio recorder” wording from the permission screen.
-- Updated the menu bar item to use a microphone icon instead of the old `M` mark.

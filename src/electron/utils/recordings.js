@@ -4,7 +4,6 @@ const crypto = require("node:crypto");
 
 const LIBRARY_DIR_NAME = ".meetlify";
 const LIBRARY_FILE_NAME = "recordings-index.json";
-
 const buildRecordingId = () => crypto.randomUUID();
 const getRecordingFingerprint = (stats) => {
   const timestamp = Math.round((stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs || 0) / 1000);
@@ -55,6 +54,19 @@ const findIndexEntryForAudioPath = (indexEntries, audioPath) =>
 const findIndexEntryForFingerprint = (indexEntries, fingerprint) =>
   indexEntries.find((entry) => entry?.fingerprint === fingerprint) || null;
 
+const resolveExistingTranscriptPath = async ({ transcriptPath, audioPath, transcriptsFolderPath }) => {
+  if (transcriptPath && await fileExists(transcriptPath)) {
+    return transcriptPath;
+  }
+
+  const legacyTranscriptPath = getLegacyTranscriptPath(audioPath, transcriptsFolderPath);
+  if (await fileExists(legacyTranscriptPath)) {
+    return legacyTranscriptPath;
+  }
+
+  return null;
+};
+
 const ensureIndexEntry = async ({
   indexEntries,
   recordingsFolderPath,
@@ -74,7 +86,11 @@ const ensureIndexEntry = async ({
       audioPath,
       fingerprint,
       displayName: existingEntry.displayName || fallbackDisplayName,
-      transcriptPath: existingEntry.transcriptPath || getManagedTranscriptPath(recordingId, transcriptsFolderPath),
+      transcriptPath: await resolveExistingTranscriptPath({
+        transcriptPath: existingEntry.transcriptPath,
+        audioPath,
+        transcriptsFolderPath,
+      }),
       createdAt: existingEntry.createdAt || new Date(stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs).toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -89,17 +105,22 @@ const ensureIndexEntry = async ({
       audioPath,
       fingerprint,
       displayName: fingerprintMatch.displayName || fallbackDisplayName,
-      transcriptPath: fingerprintMatch.transcriptPath || getManagedTranscriptPath(recordingId, transcriptsFolderPath),
+      transcriptPath: await resolveExistingTranscriptPath({
+        transcriptPath: fingerprintMatch.transcriptPath,
+        audioPath,
+        transcriptsFolderPath,
+      }),
       createdAt: fingerprintMatch.createdAt || new Date(stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs).toISOString(),
       updatedAt: new Date().toISOString(),
     };
   }
 
   const recordingId = buildRecordingId();
-  const legacyTranscriptPath = getLegacyTranscriptPath(audioPath, transcriptsFolderPath);
-  const transcriptPath = await fileExists(legacyTranscriptPath)
-    ? legacyTranscriptPath
-    : getManagedTranscriptPath(recordingId, transcriptsFolderPath);
+  const transcriptPath = await resolveExistingTranscriptPath({
+    transcriptPath: null,
+    audioPath,
+    transcriptsFolderPath,
+  });
 
   return {
     id: recordingId,
@@ -118,9 +139,13 @@ const listRecordings = async (recordingsFolderPath, transcriptsFolderPath = reco
   const existingIndex = await readLibraryIndex(recordingsFolderPath);
   const nextIndex = [];
 
-  const recordings = await Promise.all(audioEntries.map(async (entry) => {
+  const recordings = (await Promise.all(audioEntries.map(async (entry) => {
     const absolutePath = path.join(recordingsFolderPath, entry.name);
     const stats = await fs.stat(absolutePath);
+    if (stats.size <= 42) {
+      return null;
+    }
+
     const indexEntry = await ensureIndexEntry({
       indexEntries: existingIndex,
       recordingsFolderPath,
@@ -140,13 +165,45 @@ const listRecordings = async (recordingsFolderPath, transcriptsFolderPath = reco
       modifiedAt: stats.mtime.toISOString(),
       transcriptPath: indexEntry.transcriptPath,
     };
-  }));
+  }))).filter(Boolean);
 
   await writeLibraryIndex(recordingsFolderPath, nextIndex);
 
   return recordings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };
 
+const updateRecordingTranscriptPath = async ({
+  recordingsFolderPath,
+  transcriptsFolderPath,
+  audioPath,
+  transcriptPath,
+}) => {
+  const existingIndex = await readLibraryIndex(recordingsFolderPath);
+  const nextIndex = await Promise.all(existingIndex.map(async (entry) => {
+    if (entry?.audioPath !== audioPath) {
+      return entry;
+    }
+
+    const recordingId = entry.id || buildRecordingId();
+    const nextTranscriptPath = transcriptPath
+      || await resolveExistingTranscriptPath({
+        transcriptPath: entry.transcriptPath || getManagedTranscriptPath(recordingId, transcriptsFolderPath),
+        audioPath,
+        transcriptsFolderPath,
+      });
+
+    return {
+      ...entry,
+      id: recordingId,
+      transcriptPath: nextTranscriptPath,
+      updatedAt: new Date().toISOString(),
+    };
+  }));
+
+  await writeLibraryIndex(recordingsFolderPath, nextIndex);
+};
+
 module.exports = {
   listRecordings,
+  updateRecordingTranscriptPath,
 };

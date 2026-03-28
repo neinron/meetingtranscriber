@@ -18,7 +18,7 @@ const ensurePlaybackPreview = async (recordingPath) => {
     fs.stat(previewPath).catch(() => null),
   ]);
 
-  if (!sourceStats || sourceStats.size < 512) {
+  if (!sourceStats || sourceStats.size <= 42) {
     throw new Error("Recording file is empty or invalid. Please record again.");
   }
 

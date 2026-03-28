@@ -18,6 +18,7 @@ let currentRecordingName = "";
 let currentStartedAtMs = null;
 let userInitiatedStop = false;
 let recorderLastError = "";
+let recorderLastStartError = "";
 let desiredFinalFilename = "";
 
 const sendStatus = (status, timestamp = Date.now(), filepath = null, details = "") => {
@@ -77,6 +78,22 @@ const sanitizeFilename = (value) => (value || "")
   .replace(/[/:*?"<>|]/g, "-")
   .replace(/\s+/g, " ");
 
+const resolveUniqueRecordingPath = (directory, baseName, extension = ".flac", originalPath = null) => {
+  const sanitizedBaseName = sanitizeFilename(baseName);
+  if (!directory || !sanitizedBaseName) {
+    return originalPath || null;
+  }
+
+  let candidatePath = path.join(directory, `${sanitizedBaseName}${extension}`);
+  let suffix = 1;
+  while (fs.existsSync(candidatePath) && candidatePath !== originalPath) {
+    candidatePath = path.join(directory, `${sanitizedBaseName}-${suffix}${extension}`);
+    suffix += 1;
+  }
+
+  return candidatePath;
+};
+
 const resolveFinalRecordingPath = (originalPath) => {
   const sanitizedBaseName = sanitizeFilename(desiredFinalFilename);
   if (!originalPath || !sanitizedBaseName) {
@@ -90,14 +107,7 @@ const resolveFinalRecordingPath = (originalPath) => {
     return originalPath;
   }
 
-  let candidatePath = path.join(directory, `${sanitizedBaseName}${extension}`);
-  let suffix = 1;
-  while (fs.existsSync(candidatePath) && candidatePath !== originalPath) {
-    candidatePath = path.join(directory, `${sanitizedBaseName} (${suffix})${extension}`);
-    suffix += 1;
-  }
-
-  return candidatePath;
+  return resolveUniqueRecordingPath(directory, sanitizedBaseName, extension, originalPath);
 };
 
 const finalizeRecordingPath = (originalPath) => {
@@ -173,6 +183,7 @@ const initRecording = (filepath, filename, micDeviceId) => {
     stdoutBuffer = "";
     stderrBuffer = "";
     recorderLastError = "";
+    recorderLastStartError = "";
     userInitiatedStop = false;
     desiredFinalFilename = filename ? sanitizeFilename(filename) : "";
 
@@ -246,9 +257,11 @@ const initRecording = (filepath, filename, micDeviceId) => {
         }
 
         if (response.code === "PERMISSION_DENIED") {
-          sendStatus("START_FAILED", Date.now(), null, "Screen recording permission denied.");
+          recorderLastStartError = "Screen recording permission denied.";
+          sendStatus("START_FAILED", Date.now(), null, recorderLastStartError);
         } else if (response.code) {
-          sendStatus("START_FAILED", Date.now(), null, `Recorder error: ${response.code}`);
+          recorderLastStartError = `Recorder error: ${response.code}`;
+          sendStatus("START_FAILED", Date.now(), null, recorderLastStartError);
         }
 
         resolveOnce(false);
@@ -261,7 +274,8 @@ const initRecording = (filepath, filename, micDeviceId) => {
 
     recordingProcess.on("error", (error) => {
       recorderLastError = `Recorder process failed to start: ${error.message}`;
-      sendStatus("START_FAILED", Date.now(), null, `Recorder process failed to start: ${error.message}`);
+      recorderLastStartError = recorderLastError;
+      sendStatus("START_FAILED", Date.now(), null, recorderLastStartError);
       resolveOnce(false);
     });
     recordingProcess.on("exit", (code, signal) => {
@@ -278,6 +292,7 @@ const initRecording = (filepath, filename, micDeviceId) => {
         if (hasStarted) {
           recorderLastError = recorderLastError || details;
         } else {
+          recorderLastStartError = details;
           sendStatus("START_FAILED", Date.now(), null, details);
         }
       } else if (hasStarted && !userInitiatedStop && !recorderLastError && signal && signal !== "SIGINT") {
@@ -327,35 +342,25 @@ module.exports.startRecording = async ({ filepath, filename, micDeviceId }) => {
   }
 
   const trimmedFilename = (filename ?? "").trim();
-  if (trimmedFilename) {
-    const fullPath = path.join(filepath, `${trimmedFilename}.flac`);
-    if (fs.existsSync(fullPath)) {
-      dialog.showMessageBox({
-        type: "error",
-        title: "Recording Error",
-        message: "File already exists. Please choose a different filename or delete the existing file.",
-        buttons: ["OK"],
-      });
-
-      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
-        global.mainWindow.loadFile(getRecordingScreenPath());
-      }
-      sendStatus("START_FAILED", Date.now(), null, "A recording with this filename already exists.");
-
-      return;
-    }
-  }
+  const resolvedFilename = trimmedFilename
+    ? path.basename(resolveUniqueRecordingPath(filepath, trimmedFilename, ".flac") || "", ".flac")
+    : null;
 
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const recordingStarted = await initRecording(filepath, trimmedFilename || null, micDeviceId);
+    const recordingStarted = await initRecording(filepath, resolvedFilename, micDeviceId);
 
     if (recordingStarted) {
       return;
     }
   }
 
-  sendStatus("START_FAILED", Date.now(), null, "Failed to start recording after multiple attempts.");
+  sendStatus(
+    "START_FAILED",
+    Date.now(),
+    null,
+    recorderLastStartError || "Failed to start recording after multiple attempts."
+  );
 };
 
 module.exports.stopRecording = () => {

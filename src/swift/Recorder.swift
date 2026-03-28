@@ -9,7 +9,6 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     static var screenCaptureStream: SCStream?
 
     var contentEligibleForSharing: SCShareableContent?
-    let semaphoreRecordingStopped = DispatchSemaphore(value: 0)
     let processingQueue = DispatchQueue(label: "recorder.processing.queue")
 
     var recordingPath: String?
@@ -23,10 +22,12 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     var systemAudioFileForRecording: AVAudioFile?
     var micAudioFileForRecording: AVAudioFile?
 
-    var startupTimeout: TimeInterval = 5.0
+    var startupTimeout: TimeInterval = 15.0
     var isStopping = false
     var didStartRecording = false
     var didFailStartup = false
+    var didRetryStartup = false
+    var startupTimeoutToken = UUID().uuidString
     var latestSystemLevel: Float = 0
     var latestMicLevel: Float = 0
     var lastLevelEmitTime: TimeInterval = 0
@@ -127,8 +128,10 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     func executeRecordingProcess() {
         setupInterruptSignalHandler()
         setupStartupTimeout()
-        self.updateAvailableContent()
-        semaphoreRecordingStopped.wait()
+        DispatchQueue.main.async { [weak self] in
+            self?.updateAvailableContent()
+        }
+        RunLoop.main.run()
     }
 
     // MARK: Microphone Capture
@@ -196,9 +199,8 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
         micCaptureSession = nil
     }
 
-    func writeMicSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    func writeMicAudioBuffer(_ micAudioBuffer: AVAudioPCMBuffer) {
         guard !isStopping else { return }
-        guard let micAudioBuffer = sampleBuffer.asPCMBuffer else { return }
         guard let convertedBuffer = convertBuffer(micAudioBuffer, to: targetAudioFormat) else { return }
         latestMicLevel = normalizedLevel(for: convertedBuffer)
         emitAudioLevels()
@@ -227,10 +229,23 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     }
 
     func setupStartupTimeout() {
+        let timeoutToken = UUID().uuidString
+        startupTimeoutToken = timeoutToken
+
         DispatchQueue.global().asyncAfter(deadline: .now() + startupTimeout) { [weak self] in
             guard let self = self else { return }
             self.processingQueue.async {
+                if self.startupTimeoutToken != timeoutToken { return }
                 if self.didStartRecording || self.didFailStartup || self.isStopping { return }
+
+                if !self.didRetryStartup {
+                    self.didRetryStartup = true
+                    RecorderCLI.terminateCapture()
+                    self.updateAvailableContent()
+                    self.setupStartupTimeout()
+                    return
+                }
+
                 self.didFailStartup = true
                 RecorderCLI.terminateCapture()
                 ResponseHandler.returnResponse(["code": "CAPTURE_START_TIMEOUT"], shouldExitProcess: true)
@@ -241,6 +256,7 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     func startRecordingSession() {
         if didStartRecording || didFailStartup || isStopping { return }
         didStartRecording = true
+        startupTimeoutToken = UUID().uuidString
 
         prepareOutputPaths()
         prepareAudioFiles()
@@ -256,12 +272,26 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     func failStartup(code: String) {
         if didStartRecording || didFailStartup || isStopping { return }
         didFailStartup = true
+        startupTimeoutToken = UUID().uuidString
         RecorderCLI.terminateCapture()
         ResponseHandler.returnResponse(["code": code], shouldExitProcess: true)
     }
 
     func updateAvailableContent() {
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, _ in
+            guard let self = self else { return }
+            if let content = content, !content.displays.isEmpty {
+                self.contentEligibleForSharing = content
+                self.setupRecordingEnvironment()
+                return
+            }
+
+            self.retryAvailableContentLookup()
+        }
+    }
+
+    func retryAvailableContentLookup() {
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { [weak self] content, _ in
             guard let self = self else { return }
             self.contentEligibleForSharing = content
             self.setupRecordingEnvironment()
@@ -276,7 +306,9 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
 
         let screenContentFilter = SCContentFilter(display: firstDisplay, excludingApplications: [], exceptingWindows: [])
 
-        Task { await initiateRecording(with: screenContentFilter) }
+        Task { @MainActor in
+            await initiateRecording(with: screenContentFilter)
+        }
     }
 
     func prepareOutputPaths() {
@@ -307,6 +339,7 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
         }
     }
 
+    @MainActor
     func initiateRecording(with filter: SCContentFilter) async {
         let streamConfiguration = SCStreamConfiguration()
         configureStream(streamConfiguration)
@@ -335,23 +368,24 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
         guard outputType == .audio else { return }
         guard sampleBuffer.isValid else { return }
+        guard let systemAudioBuffer = sampleBuffer.copiedPCMBuffer else { return }
 
         processingQueue.async { [weak self] in
-            self?.writeSystemSampleBuffer(sampleBuffer)
+            self?.writeSystemAudioBuffer(systemAudioBuffer)
         }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard sampleBuffer.isValid else { return }
+        guard let micAudioBuffer = sampleBuffer.copiedPCMBuffer else { return }
 
         processingQueue.async { [weak self] in
-            self?.writeMicSampleBuffer(sampleBuffer)
+            self?.writeMicAudioBuffer(micAudioBuffer)
         }
     }
 
-    func writeSystemSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    func writeSystemAudioBuffer(_ systemAudioBuffer: AVAudioPCMBuffer) {
         guard !isStopping else { return }
-        guard let systemAudioBuffer = sampleBuffer.asPCMBuffer else { return }
         guard let convertedBuffer = convertBuffer(systemAudioBuffer, to: targetAudioFormat) else { return }
         latestSystemLevel = normalizedLevel(for: convertedBuffer)
         emitAudioLevels()
@@ -429,58 +463,6 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
         )
     }
 
-    func mixAudioBuffers(systemBuffer: AVAudioPCMBuffer, micBuffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
-        let frameLength = max(systemBuffer.frameLength, micBuffer.frameLength)
-        let mixedBuffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameLength)!
-        mixedBuffer.frameLength = frameLength
-
-        let channelCount = Int(targetAudioFormat.channelCount)
-        for channel in 0..<channelCount {
-            let sys = systemBuffer.floatChannelData![channel]
-            let mic = micBuffer.floatChannelData![channel]
-            let mix = mixedBuffer.floatChannelData![channel]
-
-            for i in 0..<Int(systemBuffer.frameLength) {
-                mix[i] = sys[i]
-            }
-
-            for i in 0..<Int(micBuffer.frameLength) {
-                let mixedSample = mix[i] + mic[i]
-                mix[i] = max(-1.0, min(1.0, mixedSample))
-            }
-        }
-
-        return mixedBuffer
-    }
-
-    func createIntermediateAudioFile(at outputPath: String) throws -> AVAudioFile {
-        if FileManager.default.fileExists(atPath: outputPath) {
-            try? FileManager.default.removeItem(atPath: outputPath)
-        }
-
-        return try AVAudioFile(
-            forWriting: URL(fileURLWithPath: outputPath),
-            settings: targetAudioFormat.settings,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        )
-    }
-
-    func writeAudioFileContents(from sourceFile: AVAudioFile, to targetFile: AVAudioFile) throws {
-        let frameCount: AVAudioFrameCount = 4096
-
-        while true {
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
-            try sourceFile.read(into: buffer, frameCount: frameCount)
-
-            if buffer.frameLength == 0 {
-                break
-            }
-
-            try targetFile.write(from: buffer)
-        }
-    }
-
     func convertAudioFileToFlac(inputPath: String, outputPath: String) throws {
         if FileManager.default.fileExists(atPath: outputPath) {
             try? FileManager.default.removeItem(atPath: outputPath)
@@ -506,6 +488,7 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
             let errorText = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            try? FileManager.default.removeItem(atPath: outputPath)
             throw NSError(
                 domain: "MeetlifyRecorder",
                 code: Int(process.terminationStatus),
@@ -514,6 +497,122 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
                         ? errorText!
                         : "afconvert exited with code \(process.terminationStatus)."
                 ]
+            )
+        }
+
+        let outputUrl = URL(fileURLWithPath: outputPath)
+        do {
+            let decodedAudioFile = try AVAudioFile(forReading: outputUrl)
+            if decodedAudioFile.length <= 0 {
+                try? FileManager.default.removeItem(atPath: outputPath)
+                throw NSError(
+                    domain: "MeetlifyRecorder",
+                    code: 1001,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "afconvert created an empty or invalid FLAC file."
+                    ]
+                )
+            }
+        } catch {
+            try? FileManager.default.removeItem(atPath: outputPath)
+            throw error
+        }
+    }
+
+    func resolveFFmpegPath() -> String? {
+        let candidates = [
+            ProcessInfo.processInfo.environment["FFMPEG_PATH"],
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg"
+        ].compactMap { $0 }.filter { !$0.isEmpty }
+
+        for candidate in candidates where FileManager.default.fileExists(atPath: candidate) {
+            return candidate
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = ["ffmpeg"]
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let resolved = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let resolved, !resolved.isEmpty, FileManager.default.fileExists(atPath: resolved) {
+                return resolved
+            }
+        } catch {
+            return nil
+        }
+
+        return nil
+    }
+
+    func mixAudioFilesWithFFmpeg(systemPath: String, micPath: String, outputPath: String) throws {
+        guard let ffmpegPath = resolveFFmpegPath() else {
+            throw NSError(
+                domain: "MeetlifyRecorder",
+                code: 1101,
+                userInfo: [NSLocalizedDescriptionKey: "FFmpeg not available for audio mixing."]
+            )
+        }
+
+        if FileManager.default.fileExists(atPath: outputPath) {
+            try? FileManager.default.removeItem(atPath: outputPath)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ffmpegPath)
+        process.arguments = [
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y",
+            "-i", systemPath,
+            "-i", micPath,
+            "-filter_complex", "[0:a][1:a]amix=inputs=2:normalize=0",
+            "-ar", "48000",
+            "-ac", "2",
+            "-c:a", "flac",
+            outputPath,
+        ]
+
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+        process.standardOutput = Pipe()
+
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus != 0 {
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorText = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            try? FileManager.default.removeItem(atPath: outputPath)
+            throw NSError(
+                domain: "MeetlifyRecorder",
+                code: Int(process.terminationStatus),
+                userInfo: [
+                    NSLocalizedDescriptionKey: errorText?.isEmpty == false
+                        ? errorText!
+                        : "ffmpeg exited with code \(process.terminationStatus)."
+                ]
+            )
+        }
+
+        let decodedAudioFile = try AVAudioFile(forReading: URL(fileURLWithPath: outputPath))
+        if decodedAudioFile.length <= 0 {
+            try? FileManager.default.removeItem(atPath: outputPath)
+            throw NSError(
+                domain: "MeetlifyRecorder",
+                code: 1102,
+                userInfo: [NSLocalizedDescriptionKey: "FFmpeg created an empty mixed FLAC file."]
             )
         }
     }
@@ -531,44 +630,14 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
         }
 
         do {
-            let systemAudioFile = try AVAudioFile(forReading: URL(fileURLWithPath: systemTempPath))
-
             let shouldMixMicrophone = includeMicrophone
                 && (micTempPath?.isEmpty == false)
                 && FileManager.default.fileExists(atPath: micTempPath!)
                 && ((try? FileManager.default.attributesOfItem(atPath: micTempPath!)[.size] as? NSNumber)?.int64Value ?? 0) > 0
 
             if shouldMixMicrophone, let micTempPath = micTempPath {
-                let frameCount: AVAudioFrameCount = 4096
-                let mixedTempPath = finalOutputPath.replacingOccurrences(of: ".flac", with: ".mixed.caf")
-
-                do {
-                    let micAudioFile = try AVAudioFile(forReading: URL(fileURLWithPath: micTempPath))
-                    let mixedAudioFile = try createIntermediateAudioFile(at: mixedTempPath)
-
-                    while true {
-                        guard let systemBuffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
-                        guard let micBuffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
-
-                        try systemAudioFile.read(into: systemBuffer, frameCount: frameCount)
-                        try micAudioFile.read(into: micBuffer, frameCount: frameCount)
-
-                        if systemBuffer.frameLength == 0 && micBuffer.frameLength == 0 {
-                            break
-                        }
-
-                        let mixedBuffer = mixAudioBuffers(systemBuffer: systemBuffer, micBuffer: micBuffer)
-                        try mixedAudioFile.write(from: mixedBuffer)
-                    }
-
-                    try convertAudioFileToFlac(inputPath: mixedTempPath, outputPath: finalOutputPath)
-                    try? FileManager.default.removeItem(atPath: mixedTempPath)
-                    return
-                } catch {
-                    try? FileManager.default.removeItem(atPath: mixedTempPath)
-                    try convertAudioFileToFlac(inputPath: systemTempPath, outputPath: finalOutputPath)
-                    return
-                }
+                try mixAudioFilesWithFFmpeg(systemPath: systemTempPath, micPath: micTempPath, outputPath: finalOutputPath)
+                return
             }
 
             try convertAudioFileToFlac(inputPath: systemTempPath, outputPath: finalOutputPath)
@@ -609,8 +678,7 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
 
         let timestamp = Date()
         let formattedTimestamp = ISO8601DateFormatter().string(from: timestamp)
-        ResponseHandler.returnResponse(["code": "RECORDING_STOPPED", "timestamp": formattedTimestamp, "path": finalOutputPath ?? ""], shouldExitProcess: false)
-        semaphoreRecordingStopped.signal()
+        ResponseHandler.returnResponse(["code": "RECORDING_STOPPED", "timestamp": formattedTimestamp, "path": finalOutputPath ?? ""], shouldExitProcess: true)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -708,11 +776,24 @@ class ResponseHandler {
 // https://developer.apple.com/documentation/screencapturekit/capturing_screen_content_in_macos
 // For Sonoma updated to https://developer.apple.com/forums/thread/727709
 extension CMSampleBuffer {
-    var asPCMBuffer: AVAudioPCMBuffer? {
+    var copiedPCMBuffer: AVAudioPCMBuffer? {
         try? self.withAudioBufferList { audioBufferList, _ -> AVAudioPCMBuffer? in
             guard let absd = self.formatDescription?.audioStreamBasicDescription else { return nil }
-            guard let format = AVAudioFormat(standardFormatWithSampleRate: absd.mSampleRate, channels: absd.mChannelsPerFrame) else { return nil }
-            return AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: audioBufferList.unsafePointer)
+            var streamDescription = absd
+            guard let format = AVAudioFormat(streamDescription: &streamDescription) else { return nil }
+            let frameLength = AVAudioFrameCount(self.numSamples)
+            guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(frameLength, 1)) else { return nil }
+            pcmBuffer.frameLength = frameLength
+
+            let sourceBuffer = audioBufferList.unsafePointer.pointee.mBuffers
+            let destinationBuffer = pcmBuffer.mutableAudioBufferList.pointee.mBuffers
+
+            if let sourceData = sourceBuffer.mData, let destinationData = destinationBuffer.mData {
+                let byteCount = min(Int(sourceBuffer.mDataByteSize), Int(destinationBuffer.mDataByteSize))
+                memcpy(destinationData, sourceData, byteCount)
+            }
+
+            return pcmBuffer
         }
     }
 }

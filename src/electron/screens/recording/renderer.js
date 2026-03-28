@@ -61,6 +61,11 @@ let sidebarWidth = 256;
 let previousReviewTitle = "";
 let selectionRequestId = 0;
 let selectedRecordingHasTranscript = false;
+let editorHeaderResizeObserver = null;
+let currentStatusMessage = "Ready";
+let isEditingRecordingTitle = false;
+let hasCustomRecordingFilename = false;
+let recordingFilenameClockTimer = null;
 
 const statusDisplayEl = document.getElementById("status-display");
 const sidebarNewRecordingEl = document.getElementById("sidebar-new-recording");
@@ -76,6 +81,7 @@ const sidebarResizerEl = document.getElementById("sidebar-resizer");
 const settingsToggleEl = document.getElementById("settings-toggle");
 const settingsPanelEl = document.getElementById("settings-panel");
 const settingsChevronEl = document.getElementById("settings-chevron");
+const settingsCloseEl = document.getElementById("settings-close");
 const themeModeEl = document.getElementById("theme-mode");
 const geminiKeyEl = document.getElementById("gemini-key");
 const geminiKeyStatusEl = document.getElementById("gemini-key-status");
@@ -92,6 +98,7 @@ const setupViewEl = document.getElementById("setup-view");
 const reviewViewEl = document.getElementById("review-view");
 const promptViewEl = document.getElementById("prompt-view");
 const recordingFilenameEl = document.getElementById("record-filename");
+const editRecordingFilenameEl = document.getElementById("edit-record-filename");
 const microphoneSelectEl = document.getElementById("mic-select");
 const recordButtonEl = document.getElementById("record-btn");
 const recordIconEl = document.getElementById("record-icon");
@@ -101,6 +108,7 @@ const setupMetersEl = document.getElementById("setup-meters");
 const meterSystemEl = document.getElementById("meter-system");
 const meterMicEl = document.getElementById("meter-mic");
 const reviewTitleEl = document.getElementById("review-title");
+const openTranscriptButtonEl = document.getElementById("open-transcript-button");
 const titleEditButtonEl = document.getElementById("title-edit-button");
 const titleEditIconEl = document.getElementById("title-edit-icon");
 const metaDateTimeEl = document.getElementById("meta-date-time");
@@ -123,6 +131,9 @@ const costEstimateDetailEl = document.getElementById("cost-estimate-detail");
 const editorRailEl = document.getElementById("editor-rail");
 const editorPaneEl = document.getElementById("editor-pane");
 const collapseEditorEl = document.getElementById("collapse-editor");
+const editorHeaderLayoutEl = document.getElementById("editor-header-layout");
+const editorHeaderPrimaryEl = document.getElementById("editor-header-primary");
+const editorHeaderToolsEl = document.getElementById("editor-header-tools");
 const restoreEditorEl = document.getElementById("restore-editor");
 const undoBtnEl = document.getElementById("undo-btn");
 const redoBtnEl = document.getElementById("redo-btn");
@@ -173,11 +184,23 @@ const renderIcons = () => {
   if (window.lucide?.createIcons) {
     window.lucide.createIcons();
   }
+  updateEditorHeaderLayout();
+};
+
+const getModeLabel = () => {
+  if (currentView === "review") return "Editing Mode";
+  if (currentView === "prompt") return "System Prompt Mode";
+  return "Recording Mode";
+};
+
+const renderStatusMessage = () => {
+  statusDisplayEl.textContent = `${getModeLabel()} · ${currentStatusMessage}`;
+  searchStatusEl.textContent = currentStatusMessage;
 };
 
 const setStatusMessage = (message) => {
-  statusDisplayEl.textContent = message;
-  searchStatusEl.textContent = message;
+  currentStatusMessage = message;
+  renderStatusMessage();
 };
 
 const closeMp3ExportModal = (selection = null) => {
@@ -215,6 +238,55 @@ const switchView = (view) => {
   setupViewEl.classList.toggle("hidden", nextView !== "setup");
   reviewViewEl.classList.toggle("hidden", nextView !== "review");
   promptViewEl.classList.toggle("hidden", nextView !== "prompt");
+  renderStatusMessage();
+};
+
+const selectNewRecordingState = () => {
+  selectionRequestId += 1;
+  selectedRecordingId = "";
+  transcriptPath = null;
+  selectedRecordingHasTranscript = false;
+  reviewTitleEl.textContent = "Select a file";
+  metaDateTimeEl.textContent = "-";
+  metaSizeEl.textContent = "-";
+  metaDurationStaticEl.textContent = "-";
+  openTranscriptButtonEl.disabled = true;
+  openTranscriptButtonEl.classList.add("disabled-button");
+  resetPlayerSource();
+  setEditorContent("", { resetHistory: true });
+  saveBtnEl.disabled = true;
+  saveBtnEl.classList.add("disabled-button");
+  exportMp3El.disabled = true;
+  exportMp3El.classList.add("disabled-button");
+  recordingAnalysis = null;
+  updateEstimateDisplay();
+  setProcessButtonState({ isLoading: false });
+  isEditingRecordingTitle = false;
+  refreshDefaultRecordingFilename({ force: true });
+  startRecordingFilenameClock();
+  syncRecordingFilenameFieldState();
+  renderLibrary();
+};
+
+const updateEditorHeaderLayout = () => {
+  if (!editorHeaderLayoutEl || !editorHeaderPrimaryEl || !editorHeaderToolsEl || !saveBtnEl) {
+    return;
+  }
+
+  editorHeaderLayoutEl.classList.remove("editor-header-stacked");
+
+  const containerWidth = editorHeaderLayoutEl.clientWidth;
+  if (!containerWidth) return;
+
+  const primaryWidth = Math.ceil(editorHeaderPrimaryEl.getBoundingClientRect().width);
+  const toolsWidth = Math.ceil(editorHeaderToolsEl.scrollWidth);
+  const saveWidth = Math.ceil(saveBtnEl.getBoundingClientRect().width);
+  const buffer = 20;
+
+  editorHeaderLayoutEl.classList.toggle(
+    "editor-header-stacked",
+    (primaryWidth + toolsWidth + saveWidth + buffer) > containerWidth
+  );
 };
 
 const updateReviewTitleEditState = () => {
@@ -244,6 +316,73 @@ const getDefaultMeetingFilename = () => {
   const hh = String(now.getHours()).padStart(2, "0");
   const min = String(now.getMinutes()).padStart(2, "0");
   return `Meeting_Recording-${dd}${mm}${yyyy}-${hh}${min}`;
+};
+
+const syncRecordingFilenameFieldState = () => {
+  recordingFilenameEl.readOnly = !isEditingRecordingTitle;
+  editRecordingFilenameEl.disabled = isPendingStart || isPendingStop;
+  editRecordingFilenameEl.classList.toggle("disabled-button", isPendingStart || isPendingStop);
+};
+
+const setRecordingFilenameValue = (nextValue, { custom = false } = {}) => {
+  recordingFilename = nextValue;
+  recordingFilenameEl.value = nextValue;
+  hasCustomRecordingFilename = custom;
+
+  if (isRecording || isPendingStop) {
+    ipcRenderer.send("update-recording-filename", {
+      filename: recordingFilename,
+    });
+  }
+};
+
+const refreshDefaultRecordingFilename = ({ force = false } = {}) => {
+  if (!force && (isRecording || isPendingStart || isPendingStop || isEditingRecordingTitle || hasCustomRecordingFilename)) {
+    return;
+  }
+
+  const nextDefaultFilename = getDefaultMeetingFilename();
+  if (force || recordingFilename !== nextDefaultFilename) {
+    setRecordingFilenameValue(nextDefaultFilename, { custom: false });
+  }
+};
+
+const startRecordingFilenameClock = () => {
+  if (recordingFilenameClockTimer) return;
+  recordingFilenameClockTimer = window.setInterval(() => {
+    refreshDefaultRecordingFilename();
+  }, 10000);
+};
+
+const stopRecordingFilenameClock = () => {
+  if (!recordingFilenameClockTimer) return;
+  window.clearInterval(recordingFilenameClockTimer);
+  recordingFilenameClockTimer = null;
+};
+
+const stopEditingRecordingFilename = ({ restoreDefaultIfEmpty = true } = {}) => {
+  isEditingRecordingTitle = false;
+  const trimmedValue = recordingFilenameEl.value.trim();
+
+  if (!trimmedValue && restoreDefaultIfEmpty) {
+    refreshDefaultRecordingFilename({ force: true });
+  } else {
+    setRecordingFilenameValue(trimmedValue || recordingFilename, { custom: Boolean(trimmedValue) });
+  }
+
+  if (!recordingFilenameEl.value.trim()) {
+    refreshDefaultRecordingFilename({ force: true });
+  }
+
+  syncRecordingFilenameFieldState();
+};
+
+const startEditingRecordingFilename = () => {
+  if (isPendingStart || isPendingStop) return;
+  isEditingRecordingTitle = true;
+  syncRecordingFilenameFieldState();
+  recordingFilenameEl.focus();
+  recordingFilenameEl.select();
 };
 
 const formatRecordingClock = (seconds) => {
@@ -338,6 +477,42 @@ const refreshDisplayedAudioLevels = () => {
   setAudioLevels(systemLevel, micLevel);
 };
 
+const setSidebarRecordingActionState = ({ recording = false, pending = false } = {}) => {
+  if (recording) {
+    sidebarNewRecordingEl.disabled = true;
+    sidebarRailNewRecordingEl.disabled = true;
+    sidebarNewRecordingEl.style.backgroundColor = "#dc2626";
+    sidebarNewRecordingEl.style.color = "white";
+    sidebarNewRecordingEl.innerHTML = `
+      <div class="w-3.5 h-3.5 rounded-sm bg-white"></div>
+      RECORDING IN PROGRESS
+    `;
+    sidebarRailNewRecordingEl.style.backgroundColor = "#dc2626";
+    sidebarRailNewRecordingEl.style.borderColor = "#dc2626";
+    sidebarRailNewRecordingEl.style.color = "white";
+    sidebarRailNewRecordingEl.innerHTML = '<div class="w-3.5 h-3.5 rounded-sm bg-white"></div>';
+    sidebarNewRecordingEl.classList.toggle("opacity-60", pending);
+    sidebarRailNewRecordingEl.classList.toggle("opacity-60", pending);
+    return;
+  }
+
+  sidebarNewRecordingEl.disabled = false;
+  sidebarRailNewRecordingEl.disabled = false;
+  sidebarNewRecordingEl.style.backgroundColor = "#2563eb";
+  sidebarNewRecordingEl.style.color = "white";
+  sidebarNewRecordingEl.innerHTML = `
+    <i data-lucide="plus" class="w-4 h-4"></i>
+    NEW RECORDING
+  `;
+  sidebarRailNewRecordingEl.style.backgroundColor = "#2563eb";
+  sidebarRailNewRecordingEl.style.borderColor = "#2563eb";
+  sidebarRailNewRecordingEl.style.color = "white";
+  sidebarRailNewRecordingEl.innerHTML = '<i data-lucide="plus" class="w-4 h-4"></i>';
+  sidebarNewRecordingEl.classList.remove("opacity-60");
+  sidebarRailNewRecordingEl.classList.remove("opacity-60");
+  renderIcons();
+};
+
 const setRecordingButtonState = () => {
   recordButtonEl.classList.remove("opacity-60");
 
@@ -346,6 +521,7 @@ const setRecordingButtonState = () => {
     recordButtonEl.style.border = "1px solid var(--border-main)";
     recordButtonEl.style.color = "var(--text-soft)";
     recordIconEl.innerHTML = '<i data-lucide="mic" class="w-8 h-8 transition-transform group-active:scale-90"></i>';
+    setSidebarRecordingActionState({ recording: false });
     renderIcons();
   };
 
@@ -357,6 +533,7 @@ const setRecordingButtonState = () => {
       recordButtonEl.classList.add("opacity-60");
     }
     recordIconEl.innerHTML = '<div class="w-6 h-6 rounded-sm bg-white transition-transform group-active:scale-90"></div>';
+    setSidebarRecordingActionState({ recording: true, pending });
   };
 
   if (isPendingStart) {
@@ -376,6 +553,7 @@ const setRecordingButtonState = () => {
   }
 
   setIdleButton();
+  syncRecordingFilenameFieldState();
 };
 
 const setProcessButtonState = ({ isLoading = false } = {}) => {
@@ -428,6 +606,7 @@ const resetRecordingUiState = (timestamp) => {
   recorderSystemLevel = 0;
   recorderMicLevel = 0;
   microphoneSelectEl.disabled = false;
+  startRecordingFilenameClock();
   refreshDisplayedAudioLevels();
 };
 
@@ -564,6 +743,26 @@ const redoPrompt = () => {
   applyPromptHistoryValue(promptHistory.redoStack.pop());
 };
 
+const captureTextSelection = (element) => {
+  if (!element) return null;
+  return {
+    start: element.selectionStart,
+    end: element.selectionEnd,
+    direction: element.selectionDirection || "none",
+  };
+};
+
+const restoreTextSelection = (element, selection) => {
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  if (!selection) return;
+  try {
+    element.setSelectionRange(selection.start, selection.end, selection.direction);
+  } catch {
+    // Ignore selection restore failures on detached or disabled elements.
+  }
+};
+
 const updateSearchStatus = () => {
   if (!findInputEl.value) {
     searchStatusEl.textContent = "Search term required";
@@ -694,7 +893,7 @@ const renderLibrary = () => {
     item.type = "button";
     item.className = `sidebar-item w-full p-2 rounded-lg cursor-pointer flex flex-col text-left ${selectedRecordingId === recording.id ? "active" : ""}`;
     item.innerHTML = `
-      <span class="text-xs font-semibold truncate">${recording.name}</span>
+      <span class="text-xs font-semibold truncate">${recording.name.replace(/\.[^/.]+$/u, "")}</span>
       <span class="text-[9px]" style="color: var(--text-soft);">${new Date(recording.createdAt).toLocaleString()}</span>
     `;
     item.addEventListener("click", async () => {
@@ -806,7 +1005,7 @@ const updatePlayerUi = () => {
   }
 };
 
-const updateSelection = async ({ switchToReview = false, requestId = selectionRequestId } = {}) => {
+const updateSelection = async ({ switchToReview = false, requestId = selectionRequestId, loadDetails = true } = {}) => {
   const selected = getSelectedRecording();
   if (!selected) {
     transcriptPath = null;
@@ -815,6 +1014,8 @@ const updateSelection = async ({ switchToReview = false, requestId = selectionRe
     metaDateTimeEl.textContent = "-";
     metaSizeEl.textContent = "-";
     metaDurationStaticEl.textContent = "-";
+    openTranscriptButtonEl.disabled = true;
+    openTranscriptButtonEl.classList.add("disabled-button");
     resetPlayerSource();
     setEditorContent("", { resetHistory: true });
     saveBtnEl.disabled = true;
@@ -836,6 +1037,21 @@ const updateSelection = async ({ switchToReview = false, requestId = selectionRe
   exportMp3El.disabled = false;
   exportMp3El.classList.remove("disabled-button");
 
+  if (!loadDetails) {
+    resetPlayerSource();
+    setEditorContent("", { resetHistory: true });
+    transcriptPath = null;
+    selectedRecordingHasTranscript = false;
+    openTranscriptButtonEl.disabled = true;
+    openTranscriptButtonEl.classList.add("disabled-button");
+    saveBtnEl.disabled = true;
+    saveBtnEl.classList.add("disabled-button");
+    recordingAnalysis = null;
+    updateEstimateDisplay();
+    setProcessButtonState({ isLoading: false });
+    return;
+  }
+
   await refreshRecordingAnalysis();
   if (!isLatestSelectionRequest(requestId)) return;
 
@@ -854,12 +1070,16 @@ const updateSelection = async ({ switchToReview = false, requestId = selectionRe
 
   transcriptPath = selected.transcriptPath || null;
   selectedRecordingHasTranscript = false;
+  openTranscriptButtonEl.disabled = true;
+  openTranscriptButtonEl.classList.add("disabled-button");
   if (transcriptPath) {
     try {
       const result = await ipcRenderer.invoke("load-markdown", transcriptPath);
       if (!isLatestSelectionRequest(requestId)) return;
       setEditorContent(result.content || "", { resetHistory: true });
       selectedRecordingHasTranscript = true;
+      openTranscriptButtonEl.disabled = false;
+      openTranscriptButtonEl.classList.remove("disabled-button");
       saveBtnEl.disabled = false;
       saveBtnEl.classList.remove("disabled-button");
       setStatusMessage(`Loaded transcript: ${path.basename(transcriptPath)}`);
@@ -872,9 +1092,9 @@ const updateSelection = async ({ switchToReview = false, requestId = selectionRe
     }
   } else {
     setEditorContent("", { resetHistory: true });
-    saveBtnEl.disabled = true;
-    saveBtnEl.classList.add("disabled-button");
-    setStatusMessage("No transcript path available for selected recording.");
+    saveBtnEl.disabled = false;
+    saveBtnEl.classList.remove("disabled-button");
+    setStatusMessage("No transcript yet for selected recording.");
   }
 
   setProcessButtonState({ isLoading: false });
@@ -884,15 +1104,15 @@ const updateSelection = async ({ switchToReview = false, requestId = selectionRe
   }
 };
 
-const refreshRecordings = async ({ switchToReview = false } = {}) => {
+const refreshRecordings = async ({ switchToReview = false, autoSelectFirst = true, loadDetails = true } = {}) => {
   try {
     recordings = normalizeRecordings(await ipcRenderer.invoke("list-recordings"));
     if (!recordings.some((recording) => recording.id === selectedRecordingId)) {
-      selectedRecordingId = recordings[0]?.id || "";
+      selectedRecordingId = autoSelectFirst ? (recordings[0]?.id || "") : "";
     }
     renderLibrary();
     const requestId = ++selectionRequestId;
-    await updateSelection({ switchToReview, requestId });
+    await updateSelection({ switchToReview, requestId, loadDetails });
   } catch (error) {
     setStatusMessage(`Failed to load recordings: ${error.message}`);
   }
@@ -1052,9 +1272,14 @@ const applyRecordingStateSnapshot = (state) => {
     return;
   }
 
+  stopRecordingFilenameClock();
   isRecording = true;
   isPendingStart = false;
   isPendingStop = false;
+  isEditingRecordingTitle = false;
+  if (state.recordingName) {
+    setRecordingFilenameValue(path.basename(state.recordingName, path.extname(state.recordingName)), { custom: true });
+  }
   setRecordingButtonState();
   startElapsedTimer(state.startedAtMs);
   microphoneSelectEl.disabled = true;
@@ -1105,6 +1330,9 @@ const restorePane = (pane) => {
 settingsToggleEl.addEventListener("click", () => {
   setSettingsOpen(!settingsPanelOpen).catch(() => {});
 });
+settingsCloseEl.addEventListener("click", () => {
+  setSettingsOpen(false).catch(() => {});
+});
 
 themeModeEl.addEventListener("change", async () => {
   themeMode = themeModeEl.value;
@@ -1140,10 +1368,11 @@ saveApiKeyEl.addEventListener("click", async () => {
 
 saveTranscriptionPromptEl.addEventListener("click", async () => {
   const prompt = transcriptionPromptEl.value;
+  const promptSelection = captureTextSelection(transcriptionPromptEl);
   saveTranscriptionPromptEl.disabled = true;
   try {
     const result = await ipcRenderer.invoke("save-transcription-prompt", { prompt });
-    setPromptContent(result?.transcriptionPrompt || prompt, { resetHistory: true });
+    setPromptContent(result?.transcriptionPrompt || prompt);
     saveTranscriptionPromptTextEl.classList.add("hidden");
     saveTranscriptionPromptIconEl.classList.remove("hidden");
     renderIcons();
@@ -1157,6 +1386,7 @@ saveTranscriptionPromptEl.addEventListener("click", async () => {
     setStatusMessage(`Could not save transcription prompt: ${error.message}`);
   } finally {
     saveTranscriptionPromptEl.disabled = false;
+    restoreTextSelection(transcriptionPromptEl, promptSelection);
   }
 });
 
@@ -1200,8 +1430,14 @@ openTranscriptFolderEl.addEventListener("click", async () => {
   }
 });
 
-sidebarNewRecordingEl.addEventListener("click", () => switchView("setup"));
-sidebarRailNewRecordingEl.addEventListener("click", () => switchView("setup"));
+sidebarNewRecordingEl.addEventListener("click", () => {
+  selectNewRecordingState();
+  switchView("setup");
+});
+sidebarRailNewRecordingEl.addEventListener("click", () => {
+  selectNewRecordingState();
+  switchView("setup");
+});
 openTranscriptionPromptEl.addEventListener("click", () => {
   switchView("prompt");
   transcriptionPromptEl.focus();
@@ -1217,12 +1453,39 @@ sidebarRailSettingsEl.addEventListener("click", async () => {
   await setSettingsOpen(true);
 });
 
+editRecordingFilenameEl.addEventListener("click", () => {
+  startEditingRecordingFilename();
+});
+
 recordingFilenameEl.addEventListener("input", (event) => {
   recordingFilename = event.target.value;
+  hasCustomRecordingFilename = Boolean(event.target.value.trim());
   if (isRecording || isPendingStop) {
     ipcRenderer.send("update-recording-filename", {
       filename: recordingFilename,
     });
+  }
+});
+
+recordingFilenameEl.addEventListener("blur", () => {
+  stopEditingRecordingFilename();
+});
+
+recordingFilenameEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    stopEditingRecordingFilename();
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    if (hasCustomRecordingFilename) {
+      recordingFilenameEl.value = recordingFilename;
+    } else {
+      refreshDefaultRecordingFilename({ force: true });
+    }
+    stopEditingRecordingFilename();
   }
 });
 
@@ -1242,6 +1505,8 @@ recordButtonEl.addEventListener("click", () => {
           await requestRendererMicrophoneAccess();
         }
         isPendingStart = true;
+        stopEditingRecordingFilename();
+        stopRecordingFilenameClock();
         setRecordingButtonState();
         ipcRenderer.send("start-recording", {
           filename: recordingFilename,
@@ -1371,6 +1636,15 @@ reviewTitleEl.addEventListener("keydown", (event) => {
   }
 });
 
+openTranscriptButtonEl.addEventListener("click", async () => {
+  if (!transcriptPath) return;
+  try {
+    await ipcRenderer.invoke("open-path", transcriptPath);
+  } catch (error) {
+    setStatusMessage(`Could not open transcript: ${error.message}`);
+  }
+});
+
 modelSelectEl.addEventListener("change", async () => {
   updateSelectedModelDescription();
   await refreshRecordingAnalysis();
@@ -1477,12 +1751,22 @@ transcriptionPromptEl.addEventListener("input", () => {
 });
 
 saveBtnEl.addEventListener("click", async () => {
-  if (!transcriptPath) return;
+  const selected = getSelectedRecording();
+  if (!selected) return;
+  const editorSelection = captureTextSelection(markdownEditorEl);
   try {
-    await ipcRenderer.invoke("save-markdown", {
+    const result = await ipcRenderer.invoke("save-markdown", {
       markdownPath: transcriptPath,
+      filePath: selected.path,
       content: markdownEditorEl.value,
     });
+    if (result?.transcriptPath) {
+      transcriptPath = result.transcriptPath;
+      selected.transcriptPath = result.transcriptPath;
+      selectedRecordingHasTranscript = true;
+      openTranscriptButtonEl.disabled = false;
+      openTranscriptButtonEl.classList.remove("disabled-button");
+    }
     saveBtnTextEl.classList.add("hidden");
     saveBtnIconEl.classList.remove("hidden");
     renderIcons();
@@ -1491,10 +1775,20 @@ saveBtnEl.addEventListener("click", async () => {
       saveBtnIconEl.classList.add("hidden");
       renderIcons();
     }, 1500);
-    setStatusMessage(`Saved ${path.basename(transcriptPath)}`);
+    setStatusMessage(`Saved ${path.basename(result?.transcriptPath || transcriptPath)}`);
   } catch (error) {
     setStatusMessage(`Save failed: ${error.message}`);
+  } finally {
+    restoreTextSelection(markdownEditorEl, editorSelection);
   }
+});
+
+saveBtnEl.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+});
+
+saveTranscriptionPromptEl.addEventListener("mousedown", (event) => {
+  event.preventDefault();
 });
 
 copyMarkdownEl.addEventListener("click", () => {
@@ -1559,6 +1853,7 @@ resizerEl.addEventListener("mousedown", () => {
       if (editorPaneEl.style.display !== "none" && previewPaneEl.style.display !== "none") {
         editorPaneEl.style.flex = `1 1 ${ratio}%`;
         previewPaneEl.style.flex = `1 1 ${100 - ratio}%`;
+        updateEditorHeaderLayout();
       }
     }
   };
@@ -1623,6 +1918,8 @@ window.addEventListener("keydown", (event) => {
 
 ipcRenderer.on("recording-status", async (_, status, timestamp, filepath, details) => {
   if (status === "START_RECORDING") {
+    selectNewRecordingState();
+    stopRecordingFilenameClock();
     isRecording = true;
     isPendingStart = false;
     isPendingStop = false;
@@ -1641,7 +1938,7 @@ ipcRenderer.on("recording-status", async (_, status, timestamp, filepath, detail
       outputFilePathEl.textContent = filepath;
       selectedRecordingId = "";
     }
-    await refreshRecordings();
+    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
     if (filepath) {
       const matchingRecording = getRecordingByPath(filepath);
       if (matchingRecording) {
@@ -1709,11 +2006,12 @@ const init = async () => {
     settingsPanelOpen = Boolean(uiState?.disclosureState?.[DISCLOSURE_SETTINGS_PANEL]);
     await setSettingsOpen(settingsPanelOpen, { persist: false });
 
-    recordingFilename = getDefaultMeetingFilename();
-    recordingFilenameEl.value = recordingFilename;
+    refreshDefaultRecordingFilename({ force: true });
+    startRecordingFilenameClock();
+    syncRecordingFilenameFieldState();
 
     await loadTranscriptionModels();
-    await refreshRecordings();
+    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
     await loadAvailableMicrophonesIfGranted();
     applyRecordingStateSnapshot(recordingState);
     renderPreview();
@@ -1721,6 +2019,15 @@ const init = async () => {
     updatePlayerUi();
     updateHistoryButtons();
     updatePromptHistoryButtons();
+    updateEditorHeaderLayout();
+
+    if (window.ResizeObserver && editorPaneEl && editorHeaderLayoutEl) {
+      editorHeaderResizeObserver = new ResizeObserver(() => {
+        updateEditorHeaderLayout();
+      });
+      editorHeaderResizeObserver.observe(editorPaneEl);
+      editorHeaderResizeObserver.observe(editorHeaderLayoutEl);
+    }
 
     switchView("setup");
   } catch (error) {
@@ -1729,6 +2036,8 @@ const init = async () => {
 };
 
 window.addEventListener("beforeunload", () => {
+  editorHeaderResizeObserver?.disconnect();
+  stopRecordingFilenameClock();
   stopLiveMicMonitor().catch(() => {});
 });
 

@@ -35,6 +35,8 @@
             --preview-text: #d4d4d8;
             --preview-heading: #ffffff;
             --preview-empty: #27272a;
+            --settings-label: #a1a1aa;
+            --settings-copy: #d4d4d8;
         }
 
         body[data-theme="light"] {
@@ -62,6 +64,8 @@
             --preview-text: #1f2937;
             --preview-heading: #111827;
             --preview-empty: #cbd5e1;
+            --settings-label: #4b5563;
+            --settings-copy: #111827;
         }
 
         body {
@@ -78,6 +82,7 @@
         .btn-pro-standard {
             height: 32px;
             padding: 0 12px;
+            min-width: 32px;
             background-color: var(--button-main);
             border: 1px solid var(--border-main);
             border-radius: 8px;
@@ -114,22 +119,24 @@
 
         .btn-system-tertiary {
             background: transparent;
-            border: none;
+            border: 1px solid var(--border-main);
             color: var(--text-soft);
             box-shadow: none;
         }
         .btn-system-tertiary:hover {
-            background: transparent;
+            background: var(--button-hover);
             color: var(--text-main);
         }
         .btn-system-tertiary:active {
-            background: transparent;
+            background: var(--button-active);
             color: var(--text-main);
         }
 
         .btn-pro-icon {
             width: 32px;
             height: 32px;
+            min-width: 32px;
+            min-height: 32px;
             padding: 0;
             background-color: var(--button-main);
             border: 1px solid var(--border-main);
@@ -144,16 +151,16 @@
 
         .btn-pro-icon-tertiary {
             background: transparent;
-            border: none;
+            border: 1px solid var(--border-main);
             color: var(--text-soft);
             box-shadow: none;
         }
         .btn-pro-icon-tertiary:hover {
-            background: transparent;
+            background: var(--button-hover);
             color: var(--text-main);
         }
         .btn-pro-icon-tertiary:active {
-            background: transparent;
+            background: var(--button-active);
             color: var(--text-main);
         }
 
@@ -166,17 +173,28 @@
 
         .btn-pane-toggle {
             background: transparent;
-            border: none;
+            border: 1px solid var(--border-main);
             color: var(--text-soft);
         }
         .btn-pane-toggle:hover {
-            background: transparent;
+            background: var(--button-hover);
             color: var(--text-main);
+        }
+
+        .sidebar-collapse-button {
+            flex-shrink: 0;
+            color: var(--text-soft) !important;
+            white-space: nowrap;
+        }
+        .sidebar-collapse-button:hover,
+        .sidebar-collapse-button:active {
+            color: var(--text-soft) !important;
         }
 
         .btn-pro-primary {
             height: 40px;
             padding: 0 20px;
+            min-width: 40px;
             background-color: #2563eb;
             border-radius: 8px;
             color: white;
@@ -227,11 +245,81 @@
             min-width: 11rem;
         }
 
+        #editor-pane,
+        #preview-pane {
+            container-type: inline-size;
+        }
+
         .toolbar-row {
             display: flex;
             align-items: center;
             gap: 8px;
             flex-wrap: wrap;
+        }
+
+        .preview-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: nowrap;
+            white-space: nowrap;
+        }
+
+        .labels-button {
+            width: 70px;
+            min-width: 70px;
+        }
+
+        .labels-button i {
+            flex-shrink: 0;
+        }
+
+        .labels-button svg {
+            width: 14px !important;
+            height: 14px !important;
+            min-width: 14px;
+            min-height: 14px;
+            flex-shrink: 0;
+        }
+
+        .editor-header-layout {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            grid-template-areas: "primary tools save";
+            align-items: center;
+            column-gap: 12px;
+            row-gap: 8px;
+            width: 100%;
+        }
+
+        .editor-header-primary {
+            grid-area: primary;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .editor-header-tools {
+            grid-area: tools;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .editor-header-save {
+            grid-area: save;
+            justify-self: end;
+        }
+
+        .editor-header-layout.editor-header-stacked {
+            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-areas:
+                "primary save"
+                "tools tools";
         }
 
         .header-meta-row {
@@ -319,6 +407,19 @@
             }
         }
 
+        @media (max-width: 960px) {
+            .editor-header-layout {
+                grid-template-columns: minmax(0, 1fr) auto;
+                grid-template-areas:
+                    "primary save"
+                    "tools tools";
+            }
+
+            .editor-header-tools {
+                gap: 6px;
+            }
+        }
+
         @media (max-width: 760px) {
             .btn-pro-standard,
             .btn-pro-primary {
@@ -344,6 +445,25 @@
 
             .header-meta-row {
                 align-items: flex-start;
+            }
+        }
+
+        @container (max-width: 560px) {
+            .preview-header-actions .btn-pro-standard {
+                padding: 0 6px;
+                gap: 4px;
+                letter-spacing: 0.02em;
+            }
+        }
+
+        @container (max-width: 430px) {
+            .preview-header-actions {
+                gap: 4px;
+            }
+
+            .preview-header-actions .btn-pro-standard {
+                padding: 0 5px;
+                font-size: 9px;
             }
         }
 
@@ -459,6 +579,10 @@
         }
         .rail-right { border-right: none; border-left: 1px solid var(--border-main); }
         .rail-left { border-left: none; border-right: 1px solid var(--border-main); }
+        .rail-compact {
+            padding: 8px 6px;
+            gap: 8px;
+        }
 
         .hidden-panel { display: none !important; }
         .disabled-button { opacity: 0.45; pointer-events: none; }
@@ -482,6 +606,22 @@
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
         }
 
+        .settings-panel-overlay {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 78px;
+            bottom: 0;
+            min-height: 0;
+            padding: 12px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            background: var(--surface-sidebar);
+            border-top: 1px solid var(--border-soft);
+            z-index: 30;
+        }
+
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .animate-spin-fast { animation: spin 1s linear infinite; }
     </style>
@@ -495,7 +635,7 @@
     </header>
 
     <div class="flex flex-1 overflow-hidden">
-        <aside id="sidebar-pane" class="border-r flex flex-col z-20" style="width: 256px; background: var(--surface-sidebar); border-color: var(--border-soft);">
+        <aside id="sidebar-pane" class="border-r flex flex-col z-20 relative" style="width: 256px; background: var(--surface-sidebar); border-color: var(--border-soft);">
             <div class="p-4 border-b flex items-center justify-between gap-2" style="border-color: var(--border-soft);">
                 <button id="sidebar-new-recording" class="btn-pro-primary w-full h-10" type="button" style="background-color: #2563eb; color: white;">
                     <i data-lucide="plus" class="w-4 h-4"></i>
@@ -507,52 +647,76 @@
                 <div class="flex items-center justify-between mb-2 px-1 uppercase tracking-widest text-[10px] font-bold" style="color: var(--text-dim);">
                     <div class="flex items-center gap-2">
                         <span>Library</span>
-                        <button id="refresh-recordings" class="btn-pro-icon btn-pro-icon-tertiary h-7 w-7" type="button" title="Refresh library">
+                        <button id="refresh-recordings" class="btn-pro-icon btn-pro-icon-tertiary h-7 w-7" type="button" title="Refresh library" style="border-color: var(--border-main);">
                             <i data-lucide="refresh-cw" class="w-3 h-3"></i>
                         </button>
                     </div>
-                    <button id="collapse-sidebar" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted h-7 w-7" title="Collapse sidebar">
+                    <button id="collapse-sidebar" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted sidebar-collapse-button h-7 w-7" title="Collapse sidebar">
                         <i data-lucide="panel-left-close" class="w-4 h-4"></i>
                     </button>
                 </div>
                 <div id="recordings-list" class="space-y-1 overflow-y-auto no-scrollbar flex-1"></div>
             </div>
 
-            <div class="mt-auto border-t p-3" style="border-color: var(--border-soft); background: var(--surface-muted);">
-                <button id="settings-toggle" type="button" class="w-full flex items-center justify-between text-xs hover:text-white mb-2" style="color: var(--text-soft);">
+            <div class="mt-auto border-t p-3 z-40" style="border-color: var(--border-soft); background: var(--surface-muted);">
+                <button id="settings-toggle" type="button" class="w-full flex items-center justify-between text-xs hover:text-white" style="color: var(--settings-copy);">
                     <span class="flex items-center gap-2"><i data-lucide="settings" class="w-3.5 h-3.5"></i> Settings</span>
                     <i data-lucide="chevron-up" id="settings-chevron" class="w-3 h-3 transform rotate-180 transition-transform"></i>
                 </button>
-                <div id="settings-panel" class="hidden space-y-3 pt-2">
+                <div id="settings-panel" class="hidden settings-panel-overlay space-y-3 no-scrollbar">
+                    <div class="sticky top-0 z-10 -mx-3 -mt-3 px-3 py-3 flex items-center justify-between" style="background: var(--surface-sidebar); border-bottom: 1px solid var(--border-soft);">
+                        <span class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--settings-label);">Settings</span>
+                        <button id="settings-close" type="button" class="btn-pro-icon btn-system-tertiary btn-icon-muted h-7 w-7" title="Close settings">
+                            <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                        </button>
+                    </div>
                     <div class="space-y-2">
-                        <label for="theme-mode" class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Theme</label>
+                        <label for="gemini-key" class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--settings-label);">Gemini API Key</label>
+                        <input type="password" id="gemini-key" placeholder="Gemini API Key" class="input-pro w-full h-8">
+                        <div id="gemini-key-status" class="text-[10px]" style="color: var(--settings-copy);">No Gemini API key saved yet.</div>
+                        <button id="save-api-key" type="button" class="btn-pro-standard w-full">
+                            <i data-lucide="key-round" class="w-3.5 h-3.5"></i>
+                            SAVE KEY
+                        </button>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--settings-label);">Transcription Prompt</div>
+                        <button id="open-transcription-prompt" type="button" class="btn-pro-standard w-full">
+                            <i data-lucide="file-pen-line" class="w-3.5 h-3.5"></i>
+                            EDIT PROMPT
+                        </button>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--settings-label);">Permissions</div>
+                        <button id="check-permissions" type="button" class="btn-pro-standard w-full">
+                            <i data-lucide="speaker" class="w-3.5 h-3.5"></i>
+                            SYSTEM AUDIO
+                        </button>
+                        <button id="request-mic-permission" type="button" class="btn-pro-standard w-full">
+                            <i data-lucide="mic" class="w-3.5 h-3.5"></i>
+                            MICROPHONE
+                        </button>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--settings-label);">Folders</div>
+                        <button id="select-folder" type="button" class="btn-pro-standard w-full">
+                            <i data-lucide="folder-open" class="w-3.5 h-3.5"></i>
+                            OPEN RECORDINGS
+                        </button>
+                        <button id="open-transcript-folder" type="button" class="btn-pro-standard w-full">
+                            <i data-lucide="folder-search-2" class="w-3.5 h-3.5"></i>
+                            OPEN TRANSCRIPTS
+                        </button>
+                        <div id="selected-folder-path" class="hidden"></div>
+                        <div id="selected-transcripts-path" class="hidden"></div>
+                    </div>
+                    <div class="space-y-2">
+                        <label for="theme-mode" class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--settings-label);">Theme</label>
                         <select id="theme-mode" class="select-pro w-full">
                             <option value="system">System</option>
                             <option value="dark">Dark</option>
                             <option value="light">Light</option>
                         </select>
-                    </div>
-                    <div class="space-y-2">
-                        <label for="gemini-key" class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Gemini API Key</label>
-                        <input type="password" id="gemini-key" placeholder="Gemini API Key" class="input-pro w-full h-8">
-                        <div id="gemini-key-status" class="text-[10px]" style="color: var(--text-soft);">No Gemini API key saved yet.</div>
-                        <button id="save-api-key" type="button" class="btn-pro-standard w-full !text-zinc-300">SAVE KEY</button>
-                    </div>
-                    <div class="space-y-2">
-                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Transcription Prompt</div>
-                        <button id="open-transcription-prompt" type="button" class="btn-pro-standard w-full !text-zinc-300">EDIT PROMPT</button>
-                    </div>
-                    <div class="space-y-2">
-                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Permissions</div>
-                        <button id="check-permissions" type="button" class="btn-pro-standard w-full !text-zinc-300">SYSTEM AUDIO</button>
-                        <button id="request-mic-permission" type="button" class="btn-pro-standard w-full !text-zinc-300">MICROPHONE</button>
-                    </div>
-                    <div class="space-y-2">
-                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Folders</div>
-                        <button id="select-folder" type="button" class="btn-pro-standard w-full !text-zinc-300">OPEN RECORDINGS</button>
-                        <button id="open-transcript-folder" type="button" class="btn-pro-standard w-full !text-zinc-300">OPEN TRANSCRIPTS</button>
-                        <div id="selected-folder-path" class="text-[10px] break-all" style="color: var(--text-soft);"></div>
-                        <div id="selected-transcripts-path" class="text-[10px] break-all" style="color: var(--text-soft);"></div>
                     </div>
                 </div>
             </div>
@@ -580,7 +744,12 @@
             <section id="setup-view" class="absolute inset-0 p-8 flex flex-col items-center justify-center space-y-10">
                 <div class="w-full max-w-xl space-y-8 -mt-10">
                     <div class="p-6 rounded-2xl shadow-2xl space-y-6" style="background: var(--surface-muted); border: 1px solid var(--border-soft);">
-                        <input type="text" id="record-filename" placeholder="Session title..." class="w-full text-xl font-medium p-3 rounded-xl outline-none" style="background: var(--surface-card-alt); color: var(--text-main); border: 1px solid var(--border-soft);">
+                        <div class="flex items-center gap-3">
+                            <input type="text" id="record-filename" placeholder="Session title..." readonly class="w-full text-xl font-medium p-3 rounded-xl outline-none" style="background: var(--surface-card-alt); color: var(--text-main); border: 1px solid var(--border-soft);">
+                            <button id="edit-record-filename" type="button" class="btn-pro-icon btn-system-secondary btn-icon-muted flex-shrink-0" title="Edit session title">
+                                <i data-lucide="pen" class="w-4 h-4"></i>
+                            </button>
+                        </div>
                         <select id="mic-select" class="select-pro w-full !h-14 text-lg">
                             <option value="">No microphone</option>
                         </select>
@@ -599,8 +768,8 @@
                         </div>
                         <button id="output-file-path" type="button" class="text-xs underline-offset-2 hover:underline" style="color: var(--text-soft);">Start recording to see the file path</button>
                         <div id="setup-meters" class="w-full space-y-4">
-                            <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--meter-bg);"><div id="meter-system" class="meter-fill bg-blue-500" style="width: 0%"></div></div>
-                            <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--meter-bg);"><div id="meter-mic" class="meter-fill bg-emerald-500" style="width: 0%"></div></div>
+                            <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--meter-bg);"><div id="meter-system" class="meter-fill h-full bg-blue-500" style="width: 0%"></div></div>
+                            <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--meter-bg);"><div id="meter-mic" class="meter-fill h-full bg-emerald-500" style="width: 0%"></div></div>
                         </div>
                     </div>
                 </div>
@@ -611,6 +780,9 @@
                     <div class="header-meta-row">
                         <div class="flex items-center gap-3 min-w-0 flex-1">
                             <h1 id="review-title" contenteditable="false" class="text-2xl font-semibold truncate cursor-text transition-all" style="color: var(--text-main);">Select a file</h1>
+                            <button id="open-transcript-button" type="button" class="p-1 hover:bg-zinc-800 rounded transition-colors disabled-button" style="color: var(--text-soft);" title="Open transcript">
+                                <i data-lucide="folder" class="w-4 h-4"></i>
+                            </button>
                             <button id="title-edit-button" type="button" class="p-1 hover:bg-zinc-800 rounded transition-colors" style="color: var(--text-soft);"><i data-lucide="pen" class="w-4 h-4" id="title-edit-icon"></i></button>
                         </div>
                         <div class="toolbar-row text-xs font-medium" style="color: var(--text-soft);">
@@ -653,28 +825,32 @@
                 </div>
 
                 <div class="flex-1 flex overflow-hidden" id="workspace-container">
-                    <div id="editor-rail" class="rail hidden">
+                    <div id="editor-rail" class="rail rail-compact hidden">
                         <button id="restore-editor" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="panel-left-open" class="w-4 h-4"></i></button>
                     </div>
 
                     <div id="editor-pane" class="flex flex-col border-r" style="flex: 1 1 50%; border-color: var(--border-soft);">
-                        <div class="min-h-11 py-2 flex items-start justify-between gap-3 px-3 border-b flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
-                            <div class="toolbar-row">
-                                <button id="collapse-editor" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted" title="Collapse editor"><i data-lucide="panel-left-close" class="w-3.5 h-3.5"></i></button>
-                                <span class="text-[10px] font-bold uppercase tracking-widest ml-1" style="color: var(--text-soft);">Edit</span>
-                                <div class="w-px h-4 mx-2" style="background: var(--border-main);"></div>
-                                <button id="undo-btn" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="undo" class="w-3.5 h-3.5"></i></button>
-                                <button id="redo-btn" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="redo" class="w-3.5 h-3.5"></i></button>
-                                <div class="w-px h-4 mx-2" style="background: var(--border-main);"></div>
-                                <button id="toggle-find" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="search" class="w-3.5 h-3.5"></i></button>
-                                <button id="toggle-labels" type="button" class="btn-pro-standard btn-system-secondary ml-1">
-                                    <i data-lucide="users" class="w-3.5 h-3.5"></i> LABELS
+                        <div class="min-h-11 py-2 px-3 border-b flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
+                            <div id="editor-header-layout" class="editor-header-layout">
+                                <div id="editor-header-primary" class="editor-header-primary">
+                                    <button id="collapse-editor" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted" title="Collapse editor"><i data-lucide="panel-left-close" class="w-3.5 h-3.5"></i></button>
+                                    <span class="text-[10px] font-bold uppercase tracking-widest ml-1" style="color: var(--text-soft);">Edit</span>
+                                </div>
+                                <div id="editor-header-tools" class="editor-header-tools">
+                                    <div class="w-px h-4 mx-2" style="background: var(--border-main);"></div>
+                                    <button id="toggle-find" type="button" class="btn-pro-icon btn-system-secondary btn-icon-muted"><i data-lucide="search" class="w-3.5 h-3.5"></i></button>
+                                    <button id="toggle-labels" type="button" class="btn-pro-standard btn-system-secondary labels-button ml-1">
+                                        <i data-lucide="users" class="w-3.5 h-3.5"></i> LABELS
+                                    </button>
+                                    <div class="w-px h-4 mx-2" style="background: var(--border-main);"></div>
+                                    <button id="undo-btn" type="button" class="btn-pro-icon btn-system-secondary btn-icon-muted"><i data-lucide="undo" class="w-3.5 h-3.5"></i></button>
+                                    <button id="redo-btn" type="button" class="btn-pro-icon btn-system-secondary btn-icon-muted"><i data-lucide="redo" class="w-3.5 h-3.5"></i></button>
+                                </div>
+                                <button id="save-btn" type="button" class="btn-pro-icon btn-system-primary editor-header-save" title="Save transcript">
+                                    <i id="save-btn-text" data-lucide="save" class="w-4 h-4"></i>
+                                    <i id="save-btn-icon" data-lucide="check" class="w-4 h-4 hidden"></i>
                                 </button>
                             </div>
-                            <button id="save-btn" type="button" class="btn-pro-standard btn-system-primary btn-save-compact w-24">
-                                <span id="save-btn-text">SAVE</span>
-                                <i id="save-btn-icon" data-lucide="check" class="w-4 h-4 hidden"></i>
-                            </button>
                         </div>
 
                         <div id="find-bar" class="hidden p-3 border-b space-y-3 flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
@@ -713,7 +889,7 @@
                                 <button id="collapse-preview" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted" title="Collapse preview"><i data-lucide="panel-right-close" class="w-3.5 h-3.5"></i></button>
                                 <span class="text-[10px] font-bold uppercase tracking-widest ml-1" style="color: var(--text-soft);">Preview</span>
                              </div>
-                             <div class="toolbar-row justify-end">
+                             <div class="preview-header-actions justify-end">
                                 <button id="copy-markdown" type="button" class="btn-pro-standard btn-system-tertiary font-normal h-7">
                                     <i data-lucide="copy" class="w-3 h-3"></i> MD
                                 </button>
@@ -725,7 +901,7 @@
                         <div class="flex-1 p-8 overflow-y-auto prose prose-sm max-w-none no-scrollbar" id="preview-content"></div>
                     </div>
 
-                    <div id="preview-rail" class="rail rail-right hidden">
+                    <div id="preview-rail" class="rail rail-compact rail-right hidden">
                         <button id="restore-preview" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="panel-right-open" class="w-4 h-4"></i></button>
                     </div>
                 </div>

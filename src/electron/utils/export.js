@@ -106,7 +106,7 @@ const exportRecordingToMp3 = async ({ filePath, chunked = false }) => {
   const ffmpegPath = resolveFfmpegPath();
   const stats = await fsPromises.stat(filePath);
 
-  if (!stats.isFile() || stats.size < 512) {
+  if (!stats.isFile() || stats.size <= 42) {
     throw new Error("Recording file is empty or invalid.");
   }
 
