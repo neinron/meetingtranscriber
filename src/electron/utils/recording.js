@@ -13,6 +13,12 @@ let stderrBuffer = "";
 let forceKillTimer = null;
 let statusObserver = null;
 let levelsObserver = null;
+let currentRecordingPath = null;
+let currentRecordingName = "";
+let currentStartedAtMs = null;
+let userInitiatedStop = false;
+let recorderLastError = "";
+let desiredFinalFilename = "";
 
 const sendStatus = (status, timestamp = Date.now(), filepath = null, details = "") => {
   if (typeof statusObserver === "function") {
@@ -29,6 +35,15 @@ const sendStatus = (status, timestamp = Date.now(), filepath = null, details = "
 
   global.mainWindow.webContents.send("recording-status", status, timestamp, filepath, details);
 };
+
+const getRecordingSnapshot = () => ({
+  isRecording: Boolean(recordingProcess),
+  startedAtMs: currentStartedAtMs,
+  recordingPath: currentRecordingPath,
+  recordingName: currentRecordingName,
+  userInitiatedStop,
+  lastStopReason: recorderLastError,
+});
 
 const sendAudioLevels = (systemLevel = 0, micLevel = 0) => {
   if (typeof levelsObserver === "function") {
@@ -57,6 +72,49 @@ const parseJsonLine = (line) => {
   }
 };
 
+const sanitizeFilename = (value) => (value || "")
+  .trim()
+  .replace(/[/:*?"<>|]/g, "-")
+  .replace(/\s+/g, " ");
+
+const resolveFinalRecordingPath = (originalPath) => {
+  const sanitizedBaseName = sanitizeFilename(desiredFinalFilename);
+  if (!originalPath || !sanitizedBaseName) {
+    return originalPath;
+  }
+
+  const directory = path.dirname(originalPath);
+  const extension = path.extname(originalPath) || ".flac";
+  const originalBaseName = path.basename(originalPath, extension);
+  if (sanitizedBaseName === originalBaseName) {
+    return originalPath;
+  }
+
+  let candidatePath = path.join(directory, `${sanitizedBaseName}${extension}`);
+  let suffix = 1;
+  while (fs.existsSync(candidatePath) && candidatePath !== originalPath) {
+    candidatePath = path.join(directory, `${sanitizedBaseName} (${suffix})${extension}`);
+    suffix += 1;
+  }
+
+  return candidatePath;
+};
+
+const finalizeRecordingPath = (originalPath) => {
+  const targetPath = resolveFinalRecordingPath(originalPath);
+  if (!originalPath || !targetPath || originalPath === targetPath) {
+    return originalPath;
+  }
+
+  try {
+    fs.renameSync(originalPath, targetPath);
+    return targetPath;
+  } catch (error) {
+    recorderLastError = `Could not apply final recording name: ${error.message}`;
+    return originalPath;
+  }
+};
+
 const validateRecordingFolder = async (folderPath) => {
   try {
     const stats = await fs.promises.stat(folderPath);
@@ -77,12 +135,14 @@ const clearForceKillTimer = () => {
   }
 };
 
-const stopRecorderProcess = ({ forceAfterMs = 2000 } = {}) => {
+const stopRecorderProcess = ({ forceAfterMs = 2000, initiatedByUser = false } = {}) => {
   if (!recordingProcess) return;
   if (recordingProcess.killed) {
     recordingProcess = null;
     return;
   }
+
+  userInitiatedStop = initiatedByUser;
 
   try {
     recordingProcess.kill("SIGINT");
@@ -109,8 +169,12 @@ const stopRecorderProcess = ({ forceAfterMs = 2000 } = {}) => {
 const initRecording = (filepath, filename, micDeviceId) => {
   return new Promise((resolve) => {
     let settled = false;
+    let hasStarted = false;
     stdoutBuffer = "";
     stderrBuffer = "";
+    recorderLastError = "";
+    userInitiatedStop = false;
+    desiredFinalFilename = filename ? sanitizeFilename(filename) : "";
 
     const resolveOnce = (value) => {
       if (settled) return;
@@ -139,6 +203,10 @@ const initRecording = (filepath, filename, micDeviceId) => {
       for (const response of responses) {
         if (response.code === "RECORDING_STARTED") {
           const timestamp = new Date(response.timestamp).getTime();
+          hasStarted = true;
+          currentRecordingPath = response.path || null;
+          currentRecordingName = response.path ? path.basename(response.path) : "";
+          currentStartedAtMs = timestamp;
           sendStatus("START_RECORDING", timestamp, response.path);
           resolveOnce(true);
           continue;
@@ -146,13 +214,34 @@ const initRecording = (filepath, filename, micDeviceId) => {
 
         if (response.code === "RECORDING_STOPPED") {
           const timestamp = new Date(response.timestamp).getTime();
-          sendStatus("STOP_RECORDING", timestamp, response.path);
+          const stopDetails = recorderLastError;
+          const finalizedPath = stopDetails ? response.path : finalizeRecordingPath(response.path);
+          sendStatus("STOP_RECORDING", timestamp, finalizedPath);
+          if (stopDetails) {
+            sendStatus("RECORDING_STOPPED_UNEXPECTEDLY", timestamp, finalizedPath, stopDetails);
+          }
           sendAudioLevels(0, 0);
+          currentRecordingPath = null;
+          currentRecordingName = "";
+          currentStartedAtMs = null;
+          recorderLastError = "";
+          userInitiatedStop = false;
+          desiredFinalFilename = "";
           continue;
         }
 
         if (response.code === "AUDIO_LEVELS") {
           sendAudioLevels(response.systemLevel || 0, response.micLevel || 0);
+          continue;
+        }
+
+        if (response.code === "STREAM_ERROR" || response.code === "RECORDER_RUNTIME_ERROR") {
+          recorderLastError = response.message || response.details || "Recording stopped unexpectedly.";
+          continue;
+        }
+
+        if (hasStarted) {
+          recorderLastError = response.message || response.details || `Recorder error: ${response.code}`;
           continue;
         }
 
@@ -171,6 +260,7 @@ const initRecording = (filepath, filename, micDeviceId) => {
     });
 
     recordingProcess.on("error", (error) => {
+      recorderLastError = `Recorder process failed to start: ${error.message}`;
       sendStatus("START_FAILED", Date.now(), null, `Recorder process failed to start: ${error.message}`);
       resolveOnce(false);
     });
@@ -185,8 +275,28 @@ const initRecording = (filepath, filename, micDeviceId) => {
         const details = stderrMessage
           ? `Recorder exited with code ${code}. ${stderrMessage}`
           : `Recorder exited with code ${code}${signal ? ` (signal ${signal})` : ""}.`;
-        sendStatus("START_FAILED", Date.now(), null, details);
+        if (hasStarted) {
+          recorderLastError = recorderLastError || details;
+        } else {
+          sendStatus("START_FAILED", Date.now(), null, details);
+        }
+      } else if (hasStarted && !userInitiatedStop && !recorderLastError && signal && signal !== "SIGINT") {
+        recorderLastError = `Recorder exited unexpectedly${signal ? ` (${signal})` : ""}.`;
       }
+
+      if (hasStarted && currentRecordingPath && recorderLastError) {
+        const stopTimestamp = Date.now();
+        sendStatus("STOP_RECORDING", stopTimestamp, currentRecordingPath);
+        sendStatus("RECORDING_STOPPED_UNEXPECTEDLY", stopTimestamp, currentRecordingPath, recorderLastError);
+        sendAudioLevels(0, 0);
+        currentRecordingPath = null;
+        currentRecordingName = "";
+        currentStartedAtMs = null;
+        recorderLastError = "";
+        userInitiatedStop = false;
+        desiredFinalFilename = "";
+      }
+
       resolveOnce(false);
     });
   });
@@ -249,7 +359,15 @@ module.exports.startRecording = async ({ filepath, filename, micDeviceId }) => {
 };
 
 module.exports.stopRecording = () => {
-  stopRecorderProcess();
+  stopRecorderProcess({ initiatedByUser: true });
+};
+
+module.exports.stopRecordingForShutdown = () => {
+  stopRecorderProcess({ initiatedByUser: true, forceAfterMs: 4000 });
+};
+
+module.exports.updateRecordingFilename = (filename) => {
+  desiredFinalFilename = sanitizeFilename(filename);
 };
 
 module.exports.listInputDevices = async () => {
@@ -282,3 +400,5 @@ module.exports.setRecordingObservers = ({ onStatus, onLevels } = {}) => {
   statusObserver = typeof onStatus === "function" ? onStatus : null;
   levelsObserver = typeof onLevels === "function" ? onLevels : null;
 };
+
+module.exports.getRecordingSnapshot = getRecordingSnapshot;

@@ -1,16 +1,39 @@
 const path = require("node:path");
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Tray, nativeImage, systemPreferences, desktopCapturer } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  shell,
+  Menu,
+  Tray,
+  nativeImage,
+  systemPreferences,
+  desktopCapturer,
+  Notification,
+} = require("electron");
 const { loadEnv } = require("./utils/env");
 loadEnv();
 
-const { startRecording, stopRecording, listInputDevices, setRecordingObservers } = require("./utils/recording");
+const {
+  startRecording,
+  stopRecording,
+  stopRecordingForShutdown,
+  listInputDevices,
+  updateRecordingFilename,
+  setRecordingObservers,
+  getRecordingSnapshot,
+} = require("./utils/recording");
 const { listRecordings } = require("./utils/recordings");
 const { processRecordingWithGemini } = require("./utils/gemini");
-const { getGeminiSettingsSummary, saveGeminiApiKey } = require("./utils/settings");
+const { getGeminiSettingsSummary, saveGeminiApiKey, saveTranscriptionPrompt, getUiDisclosureState, saveUiDisclosureState, getThemeMode, saveThemeMode } = require("./utils/settings");
 const { getTranscriptPathForRecording, readMarkdown, saveMarkdown } = require("./utils/markdown");
 const { getPermissionDeniedScreenPath, getRecordingScreenPath, getAppStoragePaths } = require("./utils/paths");
 const { ensurePlaybackPreview } = require("./utils/playback");
 const { exportRecordingToMp3 } = require("./utils/export");
+const { getRecordingAnalysis } = require("./utils/recording-analysis");
+const { getExchangeRate } = require("./utils/exchange-rate");
+const { getTranscriptionModels, estimateGeminiCost } = require("./utils/gemini-models");
 
 const isDev = !app.isPackaged;
 let tray = null;
@@ -24,6 +47,14 @@ const trayState = {
   systemLevel: 0,
   micLevel: 0,
 };
+const recorderState = {
+  isRecording: false,
+  startedAtMs: null,
+  recordingPath: null,
+  recordingName: "",
+  userInitiatedStop: false,
+  lastStopReason: "",
+};
 
 const logError = (context, error) => {
   const message = error?.stack || error?.message || String(error);
@@ -32,6 +63,18 @@ const logError = (context, error) => {
 };
 
 const getStoragePaths = () => getAppStoragePaths();
+
+const safeSend = (channel, ...args) => {
+  if (!global.mainWindow || global.mainWindow.isDestroyed()) {
+    return;
+  }
+
+  global.mainWindow.webContents.send(channel, ...args);
+};
+
+const syncRecorderStateFromSnapshot = () => {
+  Object.assign(recorderState, getRecordingSnapshot());
+};
 
 const ensureMicrophonePermission = async () => {
   if (process.platform !== "darwin") {
@@ -129,36 +172,9 @@ const openMainWindow = async () => {
   if (global.mainWindow.isMinimized()) {
     global.mainWindow.restore();
   }
+
   global.mainWindow.show();
   global.mainWindow.focus();
-};
-
-const startRecordingFromTray = async () => {
-  const { recordingsPath } = getStoragePaths();
-  const filename = (lastStartOptions.filename || "").trim() || getDefaultFilename();
-  const micDeviceId = lastStartOptions.micDeviceId ?? null;
-
-  if (micDeviceId !== null) {
-    const micGranted = await ensureMicrophonePermission();
-    if (!micGranted) {
-      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
-        global.mainWindow.webContents.send(
-          "recording-status",
-          "START_FAILED",
-          Date.now(),
-          null,
-          getMicrophonePermissionMessage()
-        );
-      }
-      return;
-    }
-  }
-
-  await startRecording({
-    filepath: recordingsPath,
-    filename,
-    micDeviceId,
-  });
 };
 
 const updateTrayMenu = () => {
@@ -176,6 +192,7 @@ const updateTrayMenu = () => {
       label: trayState.isRecording ? "Stop Recording" : "Start Recording",
       click: () => {
         if (trayState.isRecording) {
+          recorderState.userInitiatedStop = true;
           stopRecording();
           return;
         }
@@ -184,12 +201,12 @@ const updateTrayMenu = () => {
       },
     },
     { type: "separator" },
-    { label: `Recording: ${trayState.recordingName || "-"}`, enabled: false },
-    { label: `Length: ${formatDuration(trayState.startedAtMs)}`, enabled: false },
     {
       label: `Levels (S/M/T): ${toPercent(trayState.systemLevel)} / ${toPercent(trayState.micLevel)} / ${toPercent(totalLevel)}`,
       enabled: false,
     },
+    { label: `Recording: ${trayState.recordingName || "-"}`, enabled: false },
+    { label: `Length: ${formatDuration(trayState.startedAtMs)}`, enabled: false },
     { type: "separator" },
     {
       label: "Stop Meetlify",
@@ -199,6 +216,9 @@ const updateTrayMenu = () => {
 
   tray.setContextMenu(Menu.buildFromTemplate(template));
   tray.setToolTip(trayState.isRecording ? `Meetlify • Recording ${formatDuration(trayState.startedAtMs)}` : "Meetlify");
+  if (process.platform === "darwin") {
+    tray.setTitle(trayState.isRecording ? "Recording" : "");
+  }
 };
 
 const setTrayTicking = (enabled) => {
@@ -246,9 +266,6 @@ const getTrayIcon = () => {
 const setupTray = () => {
   if (tray) return;
   tray = new Tray(getTrayIcon());
-  if (process.platform === "darwin") {
-    tray.setTitle("");
-  }
   tray.on("double-click", () => {
     openMainWindow().catch((error) => logError("tray-double-click", error));
   });
@@ -276,12 +293,40 @@ const safeLoadScreen = async (screenPath) => {
   }
 };
 
+const showUnexpectedStopNotification = ({ filepath, details }) => {
+  if (!Notification.isSupported()) {
+    return;
+  }
+
+  const bodyParts = [];
+  if (details) {
+    bodyParts.push(details);
+  }
+  if (filepath) {
+    bodyParts.push(path.basename(filepath));
+  }
+
+  const notification = new Notification({
+    title: "Recording stopped unexpectedly",
+    body: bodyParts.join("\n"),
+    silent: false,
+  });
+
+  notification.on("click", () => {
+    openMainWindow().catch((error) => logError("notification-open-window", error));
+    if (filepath) {
+      shell.openPath(path.dirname(filepath)).catch(() => {});
+    }
+  });
+  notification.show();
+};
+
 const createWindow = async () => {
   global.mainWindow = new BrowserWindow({
-    width: 980,
-    height: 760,
-    minWidth: 760,
-    minHeight: 680,
+    width: 1120,
+    height: 860,
+    minWidth: 860,
+    minHeight: 720,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -299,9 +344,8 @@ const createWindow = async () => {
       return;
     }
 
-    isQuitting = true;
     event.preventDefault();
-    app.quit();
+    global.mainWindow.hide();
   });
 
   global.mainWindow.on("closed", () => {
@@ -313,7 +357,6 @@ const createWindow = async () => {
 
     if (isPermissionGranted) {
       await safeLoadScreen(getRecordingScreenPath());
-
       global.mainWindow.webContents.once("did-finish-load", () => {
         requestMicrophonePermissionIfNeeded().catch((error) => {
           logError("startup-microphone-permission", error);
@@ -328,39 +371,50 @@ const createWindow = async () => {
   }
 };
 
+const startRecordingFromTray = async () => {
+  const { recordingsPath } = getStoragePaths();
+  const filename = (lastStartOptions.filename || "").trim() || getDefaultFilename();
+  const micDeviceId = lastStartOptions.micDeviceId ?? null;
+
+  if (micDeviceId !== null) {
+    const micGranted = await ensureMicrophonePermission();
+    if (!micGranted) {
+      safeSend("recording-status", "START_FAILED", Date.now(), null, getMicrophonePermissionMessage());
+      return;
+    }
+  }
+
+  await startRecording({
+    filepath: recordingsPath,
+    filename,
+    micDeviceId,
+  });
+};
+
 ipcMain.on("start-recording", async (_, { filename, micDeviceId }) => {
   lastStartOptions = {
     filename: filename || "",
     micDeviceId: micDeviceId ?? null,
   };
+  recorderState.userInitiatedStop = false;
 
   try {
     const screenGranted = await ensureScreenPermissionFromApp();
     if (!screenGranted) {
-      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
-        global.mainWindow.webContents.send(
-          "recording-status",
-          "START_FAILED",
-          Date.now(),
-          null,
-          "Screen recording permission denied. Enable it in System Settings > Privacy & Security > Screen Recording."
-        );
-      }
+      safeSend(
+        "recording-status",
+        "START_FAILED",
+        Date.now(),
+        null,
+        "Screen recording permission denied. Enable it in System Settings > Privacy & Security > Screen Recording."
+      );
       return;
     }
 
     if (micDeviceId !== null) {
       const micGranted = await ensureMicrophonePermission();
       if (!micGranted) {
-        if (global.mainWindow && !global.mainWindow.isDestroyed()) {
-          global.mainWindow.webContents.send(
-            "recording-status",
-            "START_FAILED",
-            Date.now(),
-            null,
-            getMicrophonePermissionMessage()
-          );
-        }
+        safeSend("recording-status", "START_FAILED", Date.now(), null, getMicrophonePermissionMessage());
         return;
       }
     }
@@ -373,24 +427,71 @@ ipcMain.on("start-recording", async (_, { filename, micDeviceId }) => {
     });
   } catch (error) {
     logError("start-recording", error);
-    global.mainWindow.webContents.send("recording-status", "START_FAILED", Date.now(), null, error.message);
+    safeSend("recording-status", "START_FAILED", Date.now(), null, error.message);
   }
 });
 
 ipcMain.on("stop-recording", () => {
+  recorderState.userInitiatedStop = true;
   stopRecording();
 });
 
-ipcMain.handle("get-storage-paths", async () => {
-  return getStoragePaths();
+ipcMain.on("update-recording-filename", (_, { filename }) => {
+  lastStartOptions.filename = filename || "";
+  updateRecordingFilename(filename || "");
+
+  if (recorderState.isRecording) {
+    recorderState.recordingName = (filename || "").trim() || recorderState.recordingName;
+    trayState.recordingName = recorderState.recordingName || "-";
+    updateTrayMenu();
+  }
 });
 
-ipcMain.handle("get-gemini-settings", async () => {
-  return getGeminiSettingsSummary();
+ipcMain.handle("get-storage-paths", async () => getStoragePaths());
+
+ipcMain.handle("get-gemini-settings", async () => getGeminiSettingsSummary());
+
+ipcMain.handle("save-gemini-api-key", async (_, { apiKey }) => saveGeminiApiKey(apiKey));
+ipcMain.handle("save-transcription-prompt", async (_, { prompt }) => ({
+  transcriptionPrompt: saveTranscriptionPrompt(prompt),
+}));
+
+ipcMain.handle("get-ui-state", async () => ({
+  disclosureState: getUiDisclosureState(),
+  themeMode: getThemeMode(),
+}));
+
+ipcMain.handle("set-disclosure-state", async (_, disclosureState) => ({
+  disclosureState: saveUiDisclosureState(disclosureState),
+}));
+
+ipcMain.handle("set-theme-mode", async (_, themeMode) => ({
+  themeMode: saveThemeMode(themeMode),
+}));
+
+ipcMain.handle("get-recording-state", async () => {
+  syncRecorderStateFromSnapshot();
+  return { ...recorderState };
 });
 
-ipcMain.handle("save-gemini-api-key", async (_, { apiKey }) => {
-  return saveGeminiApiKey(apiKey);
+ipcMain.handle("get-transcription-models", async () => ({
+  models: getTranscriptionModels(),
+}));
+
+ipcMain.handle("get-recording-analysis", async (_, { filePath, model }) => {
+  const analysis = await getRecordingAnalysis(filePath);
+  const exchangeRate = await getExchangeRate();
+  const estimate = estimateGeminiCost({
+    durationSeconds: analysis.durationSeconds || 0,
+    modelId: model,
+    eurPerUsd: exchangeRate.eurPerUsd,
+  });
+
+  return {
+    ...analysis,
+    exchangeRate,
+    estimate,
+  };
 });
 
 ipcMain.handle("list-recordings", async () => {
@@ -406,17 +507,15 @@ ipcMain.handle("list-input-devices", async () => {
   return listInputDevices();
 });
 
-ipcMain.handle("get-microphone-permission-status", async () => {
-  return {
-    status: systemPreferences.getMediaAccessStatus("microphone"),
-    message: getMicrophonePermissionMessage(),
-  };
-});
+ipcMain.handle("get-microphone-permission-status", async () => ({
+  status: systemPreferences.getMediaAccessStatus("microphone"),
+  message: getMicrophonePermissionMessage(),
+}));
 
-ipcMain.handle("process-recording", async (_, { filePath, model }) => {
+ipcMain.handle("process-recording", async (_, { filePath, model, transcriptPath: requestedTranscriptPath }) => {
   const { transcriptsPath } = getStoragePaths();
   const markdown = await processRecordingWithGemini({ filePath, model });
-  const transcriptPath = getTranscriptPathForRecording(filePath, transcriptsPath);
+  const transcriptPath = requestedTranscriptPath || getTranscriptPathForRecording(filePath, transcriptsPath);
 
   await saveMarkdown(transcriptPath, markdown);
 
@@ -513,42 +612,57 @@ ipcMain.handle("request-microphone-permission", async () => {
 
 process.on("uncaughtException", (error) => {
   logError("uncaught-exception", error);
-  stopRecording();
+  stopRecordingForShutdown();
 });
 
 process.on("unhandledRejection", (reason) => {
   logError("unhandled-rejection", reason);
-  stopRecording();
+  stopRecordingForShutdown();
 });
 
 app.on("before-quit", () => {
   isQuitting = true;
-  stopRecording();
+  stopRecordingForShutdown();
   destroyTray();
 });
 
 app.on("window-all-closed", () => {
-  stopRecording();
-  destroyTray();
-  app.quit();
+  if (process.platform !== "darwin") {
+    isQuitting = true;
+    stopRecordingForShutdown();
+    destroyTray();
+    app.quit();
+  }
 });
 
-app.whenReady().then(createWindow).catch((error) => {
-  logError("app-ready", error);
+app.on("activate", () => {
+  openMainWindow().catch((error) => logError("app-activate", error));
 });
 
 setRecordingObservers({
-  onStatus: ({ status, timestamp, filepath }) => {
+  onStatus: ({ status, timestamp, filepath, details }) => {
     if (status === "START_RECORDING") {
+      recorderState.isRecording = true;
+      recorderState.startedAtMs = Number.isFinite(timestamp) ? timestamp : Date.now();
+      recorderState.recordingPath = filepath || null;
+      recorderState.recordingName = filepath ? path.basename(filepath) : "";
+      recorderState.lastStopReason = "";
+      recorderState.userInitiatedStop = false;
+
       trayState.isRecording = true;
-      trayState.startedAtMs = Number.isFinite(timestamp) ? timestamp : Date.now();
-      trayState.recordingName = filepath ? path.basename(filepath) : "-";
+      trayState.startedAtMs = recorderState.startedAtMs;
+      trayState.recordingName = recorderState.recordingName || "-";
       setTrayTicking(true);
       updateTrayMenu();
       return;
     }
 
     if (status === "STOP_RECORDING") {
+      recorderState.isRecording = false;
+      recorderState.startedAtMs = null;
+      recorderState.recordingPath = null;
+      recorderState.recordingName = "";
+
       trayState.isRecording = false;
       trayState.startedAtMs = null;
       trayState.recordingName = "-";
@@ -559,7 +673,26 @@ setRecordingObservers({
       return;
     }
 
+    if (status === "RECORDING_STOPPED_UNEXPECTEDLY") {
+      recorderState.lastStopReason = details || "Recording stopped unexpectedly.";
+      if (!recorderState.userInitiatedStop) {
+        showUnexpectedStopNotification({
+          filepath,
+          details: recorderState.lastStopReason,
+        });
+      }
+      recorderState.userInitiatedStop = false;
+      return;
+    }
+
     if (status === "START_FAILED") {
+      recorderState.isRecording = false;
+      recorderState.startedAtMs = null;
+      recorderState.recordingPath = null;
+      recorderState.recordingName = "";
+      recorderState.lastStopReason = details || "";
+      recorderState.userInitiatedStop = false;
+
       trayState.isRecording = false;
       trayState.startedAtMs = null;
       trayState.systemLevel = 0;
@@ -575,8 +708,9 @@ setRecordingObservers({
   },
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setupTray();
+  await createWindow();
 }).catch((error) => {
-  logError("tray-init", error);
+  logError("app-ready", error);
 });

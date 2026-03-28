@@ -453,47 +453,130 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
         return mixedBuffer
     }
 
+    func createIntermediateAudioFile(at outputPath: String) throws -> AVAudioFile {
+        if FileManager.default.fileExists(atPath: outputPath) {
+            try? FileManager.default.removeItem(atPath: outputPath)
+        }
+
+        return try AVAudioFile(
+            forWriting: URL(fileURLWithPath: outputPath),
+            settings: targetAudioFormat.settings,
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false
+        )
+    }
+
+    func writeAudioFileContents(from sourceFile: AVAudioFile, to targetFile: AVAudioFile) throws {
+        let frameCount: AVAudioFrameCount = 4096
+
+        while true {
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
+            try sourceFile.read(into: buffer, frameCount: frameCount)
+
+            if buffer.frameLength == 0 {
+                break
+            }
+
+            try targetFile.write(from: buffer)
+        }
+    }
+
+    func convertAudioFileToFlac(inputPath: String, outputPath: String) throws {
+        if FileManager.default.fileExists(atPath: outputPath) {
+            try? FileManager.default.removeItem(atPath: outputPath)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+        process.arguments = [
+            "-f", "flac",
+            "-d", "flac",
+            inputPath,
+            outputPath,
+        ]
+
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+        process.standardOutput = Pipe()
+
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus != 0 {
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorText = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(
+                domain: "MeetlifyRecorder",
+                code: Int(process.terminationStatus),
+                userInfo: [
+                    NSLocalizedDescriptionKey: errorText?.isEmpty == false
+                        ? errorText!
+                        : "afconvert exited with code \(process.terminationStatus)."
+                ]
+            )
+        }
+    }
+
     func mergeTempFilesIntoFinalOutput() {
         guard
             let systemTempPath = systemTempPath,
-            let micTempPath = micTempPath,
             let finalOutputPath = finalOutputPath
         else {
-            ResponseHandler.returnResponse(["code": "MERGE_FAILED"], shouldExitProcess: false)
+            ResponseHandler.returnResponse([
+                "code": "RECORDER_RUNTIME_ERROR",
+                "message": "Final merge failed because the temporary system recording file is missing."
+            ], shouldExitProcess: false)
             return
         }
 
         do {
             let systemAudioFile = try AVAudioFile(forReading: URL(fileURLWithPath: systemTempPath))
-            let micAudioFile = try AVAudioFile(forReading: URL(fileURLWithPath: micTempPath))
-            let mixedAudioFile = try AVAudioFile(
-                forWriting: URL(fileURLWithPath: finalOutputPath),
-                settings: [
-                    AVSampleRateKey: 48_000,
-                    AVNumberOfChannelsKey: 2,
-                    AVFormatIDKey: kAudioFormatFLAC,
-                ],
-                commonFormat: .pcmFormatFloat32,
-                interleaved: false
-            )
 
-            let frameCount: AVAudioFrameCount = 4096
-            while true {
-                guard let systemBuffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
-                guard let micBuffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
+            let shouldMixMicrophone = includeMicrophone
+                && (micTempPath?.isEmpty == false)
+                && FileManager.default.fileExists(atPath: micTempPath!)
+                && ((try? FileManager.default.attributesOfItem(atPath: micTempPath!)[.size] as? NSNumber)?.int64Value ?? 0) > 0
 
-                try systemAudioFile.read(into: systemBuffer, frameCount: frameCount)
-                try micAudioFile.read(into: micBuffer, frameCount: frameCount)
+            if shouldMixMicrophone, let micTempPath = micTempPath {
+                let frameCount: AVAudioFrameCount = 4096
+                let mixedTempPath = finalOutputPath.replacingOccurrences(of: ".flac", with: ".mixed.caf")
 
-                if systemBuffer.frameLength == 0 && micBuffer.frameLength == 0 {
-                    break
+                do {
+                    let micAudioFile = try AVAudioFile(forReading: URL(fileURLWithPath: micTempPath))
+                    let mixedAudioFile = try createIntermediateAudioFile(at: mixedTempPath)
+
+                    while true {
+                        guard let systemBuffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
+                        guard let micBuffer = AVAudioPCMBuffer(pcmFormat: targetAudioFormat, frameCapacity: frameCount) else { break }
+
+                        try systemAudioFile.read(into: systemBuffer, frameCount: frameCount)
+                        try micAudioFile.read(into: micBuffer, frameCount: frameCount)
+
+                        if systemBuffer.frameLength == 0 && micBuffer.frameLength == 0 {
+                            break
+                        }
+
+                        let mixedBuffer = mixAudioBuffers(systemBuffer: systemBuffer, micBuffer: micBuffer)
+                        try mixedAudioFile.write(from: mixedBuffer)
+                    }
+
+                    try convertAudioFileToFlac(inputPath: mixedTempPath, outputPath: finalOutputPath)
+                    try? FileManager.default.removeItem(atPath: mixedTempPath)
+                    return
+                } catch {
+                    try? FileManager.default.removeItem(atPath: mixedTempPath)
+                    try convertAudioFileToFlac(inputPath: systemTempPath, outputPath: finalOutputPath)
+                    return
                 }
-
-                let mixedBuffer = mixAudioBuffers(systemBuffer: systemBuffer, micBuffer: micBuffer)
-                try mixedAudioFile.write(from: mixedBuffer)
             }
+
+            try convertAudioFileToFlac(inputPath: systemTempPath, outputPath: finalOutputPath)
         } catch {
-            ResponseHandler.returnResponse(["code": "MERGE_FAILED"], shouldExitProcess: false)
+            ResponseHandler.returnResponse([
+                "code": "RECORDER_RUNTIME_ERROR",
+                "message": "Final merge failed: \(error.localizedDescription)"
+            ], shouldExitProcess: false)
         }
     }
 
@@ -539,7 +622,11 @@ class RecorderCLI: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDat
                 return
             }
             if !self.isStopping {
-                ResponseHandler.returnResponse(["code": "STREAM_ERROR: \(errorMessage)"], shouldExitProcess: false)
+                ResponseHandler.returnResponse([
+                    "code": "STREAM_ERROR",
+                    "message": errorMessage,
+                    "path": self.finalOutputPath ?? ""
+                ], shouldExitProcess: false)
                 self.stopAndFinalize()
             }
         }

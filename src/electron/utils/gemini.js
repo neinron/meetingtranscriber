@@ -1,28 +1,48 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { getGeminiApiKey } = require("./settings");
+const { getGeminiApiKey, getTranscriptionPrompt } = require("./settings");
+const { DEFAULT_TRANSCRIPTION_MODEL, METADATA_MODEL } = require("./gemini-models");
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
-const DEFAULT_MODEL = "gemini-2.5-flash";
-const METADATA_MODEL = "gemini-2.5-flash";
 const DIARIZATION_LINE_REGEX = /^\[(\d{2}:\d{2}:\d{2})\]\s+(Speaker\s+\d+):\s*(.*)$/;
-const TITLE_PLACEHOLDER = "{title placeholder}";
 const DESCRIPTION_PLACEHOLDER = "{description placeholder}";
 
-const buildPrompt = () => [
-  "You are a precise meeting transcription assistant.",
-  "Produce a diarized transcript as plain text lines.",
-  "Requirements:",
-  "1. Output transcript lines only. No headings.",
-  "2. Transcript entries must follow this format: [HH:MM:SS] Speaker N: utterance",
-  "3. Do not include markdown headings, summary, or action items.",
-  "4. Do not include code fences.",
-  "5. Infer distinct speakers and keep labels stable (Speaker 1, Speaker 2, etc.).",
-  "6. If uncertain about a word, use [inaudible].",
-  "7. Create a new transcript entry only when the speaker changes.",
-  "8. Do not split one speaker into many short entries because of brief pauses.",
-  "9. Keep long monologues as a single entry until another speaker starts.",
-].join("\n");
+const buildPrompt = () => getTranscriptionPrompt();
+
+const extractTextFromGenerateContentPayload = (payload) => {
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    const text = parts
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("")
+      .trim();
+
+    if (text) {
+      return {
+        text,
+        finishReason: candidate?.finishReason || "",
+      };
+    }
+  }
+
+  const finishReason = candidates.find((candidate) => typeof candidate?.finishReason === "string")?.finishReason || "";
+  const blockReason = payload?.promptFeedback?.blockReason || "";
+  const safetyRatings = Array.isArray(payload?.promptFeedback?.safetyRatings)
+    ? payload.promptFeedback.safetyRatings
+        .map((rating) => [rating?.category, rating?.probability].filter(Boolean).join(": "))
+        .filter(Boolean)
+        .join(", ")
+    : "";
+
+  return {
+    text: "",
+    finishReason,
+    blockReason,
+    safetyRatings,
+  };
+};
 
 const smoothDiarizedTranscript = (markdown) => {
   const lines = markdown.split("\n");
@@ -157,13 +177,22 @@ const requestTranscript = async ({ apiKey, model, fileUri, mimeType }) => {
   }
 
   const payload = await response.json();
-  const text = payload?.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === "string")?.text;
+  const extracted = extractTextFromGenerateContentPayload(payload);
 
-  if (!text) {
-    throw new Error("Gemini transcript request returned no text.");
+  if (!extracted.text) {
+    const reasons = [
+      extracted.blockReason ? `block reason: ${extracted.blockReason}` : "",
+      extracted.finishReason ? `finish reason: ${extracted.finishReason}` : "",
+      extracted.safetyRatings ? `safety: ${extracted.safetyRatings}` : "",
+    ].filter(Boolean);
+    throw new Error(
+      reasons.length
+        ? `Gemini transcript request returned no text (${reasons.join("; ")}).`
+        : "Gemini transcript request returned no text."
+    );
   }
 
-  return text;
+  return extracted.text;
 };
 
 const buildMetadataPrompt = (transcriptText) => [
@@ -204,10 +233,19 @@ const requestMeetingMetadata = async ({ apiKey, transcriptText }) => {
   }
 
   const payload = await response.json();
-  const text = payload?.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === "string")?.text?.trim();
+  const extracted = extractTextFromGenerateContentPayload(payload);
+  const text = extracted.text.trim();
 
   if (!text) {
-    throw new Error("Gemini metadata request returned no text.");
+    const reasons = [
+      extracted.blockReason ? `block reason: ${extracted.blockReason}` : "",
+      extracted.finishReason ? `finish reason: ${extracted.finishReason}` : "",
+    ].filter(Boolean);
+    throw new Error(
+      reasons.length
+        ? `Gemini metadata request returned no text (${reasons.join("; ")}).`
+        : "Gemini metadata request returned no text."
+    );
   }
 
   const titleMatch = text.match(/TITLE:\s*(.+)/i);
@@ -235,10 +273,36 @@ const formatDateTimeForHeader = (date = new Date()) => {
   return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
 };
 
-const buildMeetingTemplate = ({ transcriptText, dateTimeLabel }) => {
+const formatDateLabel = (date = new Date()) => {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(date.getFullYear());
+  return `${dd}.${mm}.${yyyy}`;
+};
+
+const formatTimeLabel = (date = new Date()) => {
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${hh}:${min}`;
+};
+
+const parseTranscriptDurationSeconds = (transcriptText) => {
+  const matches = Array.from(transcriptText.matchAll(/\[(\d{2}):(\d{2}):(\d{2})\]/g));
+  if (!matches.length) {
+    return 0;
+  }
+
+  return Math.max(...matches.map((match) => {
+    const [, hh, mm, ss] = match;
+    return Number(hh) * 3600 + Number(mm) * 60 + Number(ss);
+  }));
+};
+
+const buildMeetingTemplate = ({ transcriptText, fileTitle, dateLine }) => {
   return [
-    `# Meeting Notes - ${dateTimeLabel}`,
-    `## ${TITLE_PLACEHOLDER}`,
+    `# ${fileTitle}`,
+    dateLine,
+    "",
     DESCRIPTION_PLACEHOLDER,
     "",
     "## Transcript",
@@ -256,9 +320,10 @@ const deleteUploadedFile = async ({ apiKey, fileName }) => {
   });
 };
 
-const processRecordingWithGemini = async ({ filePath, model = DEFAULT_MODEL }) => {
+const processRecordingWithGemini = async ({ filePath, model = DEFAULT_TRANSCRIPTION_MODEL }) => {
   const apiKey = getApiKey();
   const audioBuffer = await fs.readFile(filePath);
+  const fileStats = await fs.stat(filePath);
   const mimeType = "audio/flac";
 
   const uploadUrl = await startResumableUpload({
@@ -282,9 +347,15 @@ const processRecordingWithGemini = async ({ filePath, model = DEFAULT_MODEL }) =
     });
 
     const transcript = smoothDiarizedTranscript(transcriptRaw).trim();
+    const fileTitle = path.parse(filePath).name;
+    const endDate = fileStats.mtime instanceof Date ? fileStats.mtime : new Date(fileStats.mtimeMs);
+    const transcriptDurationSeconds = parseTranscriptDurationSeconds(transcript);
+    const startDate = new Date(endDate.getTime() - (transcriptDurationSeconds * 1000));
+    const dateLine = `Date: ${formatDateLabel(startDate)} | Start: ${formatTimeLabel(startDate)} | End: ${formatTimeLabel(endDate)}`;
     const template = buildMeetingTemplate({
       transcriptText: transcript,
-      dateTimeLabel: formatDateTimeForHeader(new Date()),
+      fileTitle,
+      dateLine,
     });
 
     let metadata = {
@@ -303,9 +374,7 @@ const processRecordingWithGemini = async ({ filePath, model = DEFAULT_MODEL }) =
       console.warn(`Gemini metadata generation failed: ${error.message}`);
     }
 
-    return template
-      .replace(TITLE_PLACEHOLDER, metadata.title)
-      .replace(DESCRIPTION_PLACEHOLDER, metadata.description);
+    return template.replace(DESCRIPTION_PLACEHOLDER, metadata.description);
   } finally {
     await deleteUploadedFile({
       apiKey,

@@ -1,355 +1,799 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' https://cdn.tailwindcss.com;" />
-    <title>Meetlify</title>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:;">
+    <title>Meetlify Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-      :root {
-        --bg-a: #f4f7ff;
-        --bg-b: #eefdf7;
-        --card: #ffffff;
-        --text: #0f172a;
-        --muted: #475569;
-        --accent: #0ea5e9;
-        --danger: #ef4444;
-      }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-      body {
-        background: radial-gradient(1200px 500px at 50% -10%, #dbeafe 0%, transparent 60%), linear-gradient(145deg, var(--bg-a), var(--bg-b));
-        color: var(--text);
-        font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
-      }
-
-      .glass-card {
-        background: rgba(255, 255, 255, 0.88);
-        backdrop-filter: blur(8px);
-        border: 1px solid rgba(148, 163, 184, 0.25);
-      }
-
-      .record-button {
-        width: 9.5rem;
-        height: 9.5rem;
-        border-radius: 9999px;
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: linear-gradient(145deg, #0ea5e9, #0284c7);
-        color: white;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
-        box-shadow: 0 20px 40px rgba(14, 165, 233, 0.25);
-      }
-
-      .record-button:hover {
-        transform: translateY(-2px);
-      }
-
-      .record-button.recording {
-        background: linear-gradient(145deg, #ef4444, #dc2626);
-        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
-        animation: pulse-ring 1.3s infinite;
-      }
-
-      .record-button.pending {
-        opacity: 0.7;
-        pointer-events: none;
-      }
-
-      @keyframes pulse-ring {
-        0% {
-          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+        :root {
+            --macos-bg: #1e1e1e;
+            --macos-sidebar: #252525;
+            --macos-border: #333333;
+            --macos-accent: #007aff;
+            --macos-text: #e0e0e0;
+            --surface-main: #1e1e1e;
+            --surface-sidebar: #1a1a1a;
+            --surface-header: #18181b;
+            --surface-card: #18181b;
+            --surface-card-alt: #09090b;
+            --surface-muted: rgba(24, 24, 27, 0.4);
+            --text-main: #e0e0e0;
+            --text-soft: #71717a;
+            --text-dim: #52525b;
+            --border-main: #333333;
+            --border-soft: #27272a;
+            --button-main: #2a2a2a;
+            --button-hover: #363636;
+            --button-active: #1a1a1a;
+            --input-bg: #161616;
+            --meter-bg: #18181b;
+            --preview-text: #d4d4d8;
+            --preview-heading: #ffffff;
+            --preview-empty: #27272a;
         }
 
-        70% {
-          box-shadow: 0 0 0 24px rgba(239, 68, 68, 0);
+        body[data-theme="light"] {
+            --macos-bg: #f5f6f8;
+            --macos-sidebar: #eef1f5;
+            --macos-border: #d7dbe2;
+            --macos-accent: #007aff;
+            --macos-text: #111827;
+            --surface-main: #f5f6f8;
+            --surface-sidebar: #eef1f5;
+            --surface-header: #ffffff;
+            --surface-card: #ffffff;
+            --surface-card-alt: #f3f4f6;
+            --surface-muted: rgba(255, 255, 255, 0.8);
+            --text-main: #111827;
+            --text-soft: #6b7280;
+            --text-dim: #4b5563;
+            --border-main: #d7dbe2;
+            --border-soft: #e5e7eb;
+            --button-main: #ffffff;
+            --button-hover: #f3f4f6;
+            --button-active: #e5e7eb;
+            --input-bg: #ffffff;
+            --meter-bg: #e5e7eb;
+            --preview-text: #1f2937;
+            --preview-heading: #111827;
+            --preview-empty: #cbd5e1;
         }
 
-        100% {
-          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-        }
-      }
-
-      .meter-fill {
-        transition: width 90ms linear;
-      }
-
-      .player-shell {
-        border: 1px solid rgba(148, 163, 184, 0.35);
-        border-radius: 0.85rem;
-        background: linear-gradient(180deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.95));
-        padding: 0.4rem 0.6rem;
-      }
-
-      #recording-player {
-        width: 100%;
-        height: 2.6rem;
-        border-radius: 0.6rem;
-        accent-color: #0ea5e9;
-      }
-
-      .wrap-safe {
-        min-width: 0;
-        overflow-wrap: anywhere;
-        word-break: break-word;
-      }
-
-      .section-shell {
-        display: grid;
-        gap: 1rem;
-      }
-
-      .status-card {
-        border: 1px solid rgba(191, 219, 254, 0.9);
-        border-radius: 1rem;
-        background: linear-gradient(180deg, rgba(239, 246, 255, 0.92), rgba(248, 250, 252, 0.95));
-        padding: 0.95rem 1rem;
-      }
-
-      .actions-grid {
-        display: grid;
-        gap: 1rem;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .setup-grid {
-        display: grid;
-        gap: 1rem;
-        grid-template-columns: minmax(0, 1fr);
-      }
-
-      .filename-row {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-      }
-
-      .meter-grid {
-        display: grid;
-        gap: 0.75rem;
-        grid-template-columns: minmax(0, 1fr);
-      }
-
-      .utility-card {
-        border: 1px solid rgba(191, 219, 254, 0.85);
-        border-radius: 1rem;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9));
-        padding: 1rem;
-      }
-
-      .player-shell.is-empty {
-        opacity: 0.65;
-      }
-
-      @media (min-width: 640px) {
-        .filename-row {
-          flex-direction: row;
-          align-items: stretch;
-        }
-      }
-
-      @media (min-width: 1180px) {
-        .setup-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--surface-main);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+            user-select: none;
         }
 
-        .meter-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
 
-      @media (max-width: 1023px) {
-        .actions-grid {
-          grid-template-columns: minmax(0, 1fr);
+        .btn-pro-standard {
+            height: 32px;
+            padding: 0 12px;
+            background-color: var(--button-main);
+            border: 1px solid var(--border-main);
+            border-radius: 8px;
+            color: var(--text-main);
+            font-size: 10px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
         }
-      }
+        .btn-pro-standard:hover { background-color: var(--button-hover); }
+        .btn-pro-standard:active { background-color: var(--button-active); }
+
+        .btn-system-primary {
+            color: #60a5fa;
+        }
+
+        .btn-save-compact {
+            padding-left: 5px;
+            padding-right: 5px;
+            gap: 3px;
+        }
+
+        .btn-system-secondary {
+            background-color: var(--button-main);
+            border: 1px solid var(--border-main);
+            color: var(--text-main);
+        }
+
+        .btn-system-tertiary {
+            background: transparent;
+            border: none;
+            color: var(--text-soft);
+            box-shadow: none;
+        }
+        .btn-system-tertiary:hover {
+            background: transparent;
+            color: var(--text-main);
+        }
+        .btn-system-tertiary:active {
+            background: transparent;
+            color: var(--text-main);
+        }
+
+        .btn-pro-icon {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            background-color: var(--button-main);
+            border: 1px solid var(--border-main);
+            border-radius: 8px;
+            color: #60a5fa;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .btn-pro-icon:hover { background-color: var(--button-hover); }
+
+        .btn-pro-icon-tertiary {
+            background: transparent;
+            border: none;
+            color: var(--text-soft);
+            box-shadow: none;
+        }
+        .btn-pro-icon-tertiary:hover {
+            background: transparent;
+            color: var(--text-main);
+        }
+        .btn-pro-icon-tertiary:active {
+            background: transparent;
+            color: var(--text-main);
+        }
+
+        .btn-icon-muted {
+            color: var(--text-soft) !important;
+        }
+        .btn-icon-muted:hover {
+            color: var(--text-main) !important;
+        }
+
+        .btn-pane-toggle {
+            background: transparent;
+            border: none;
+            color: var(--text-soft);
+        }
+        .btn-pane-toggle:hover {
+            background: transparent;
+            color: var(--text-main);
+        }
+
+        .btn-pro-primary {
+            height: 40px;
+            padding: 0 20px;
+            background-color: #2563eb;
+            border-radius: 8px;
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        .btn-pro-primary:hover { background-color: #3b82f6; transform: translateY(-1px); }
+        .btn-pro-primary:active { background-color: #1d4ed8; transform: translateY(0); }
+
+        .review-controls-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: nowrap;
+        }
+
+        .review-control-wide {
+            width: 16rem;
+            flex: 1 1 16rem;
+            min-width: 12rem;
+        }
+
+        .review-control-cost {
+            width: 8rem;
+            flex: 0 1 8rem;
+            min-width: 6.5rem;
+        }
+
+        .review-model-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex: 1 1 24rem;
+            min-width: 18rem;
+        }
+
+        .review-control-action {
+            width: 16rem;
+            flex: 0 1 16rem;
+            min-width: 11rem;
+        }
+
+        .toolbar-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .header-meta-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        @media (max-width: 1180px) {
+            .btn-pro-standard {
+                padding: 0 10px;
+                font-size: 9px;
+            }
+
+            .btn-pro-primary {
+                padding: 0 16px;
+                font-size: 10px;
+            }
+
+            .review-controls-row {
+                gap: 12px;
+            }
+
+            .review-control-wide {
+                width: 14rem;
+                flex-basis: 14rem;
+                min-width: 11rem;
+            }
+
+            .review-model-group {
+                gap: 12px;
+                min-width: 16rem;
+            }
+
+            .review-control-action {
+                width: 14rem;
+                flex-basis: 14rem;
+                min-width: 10rem;
+            }
+        }
+
+        @media (max-width: 980px) {
+            .btn-pro-standard {
+                padding: 0 8px;
+                gap: 4px;
+                letter-spacing: 0.03em;
+            }
+
+            .btn-pro-primary {
+                padding: 0 12px;
+                gap: 6px;
+                letter-spacing: 0.03em;
+            }
+
+            .review-controls-row {
+                gap: 10px;
+                flex-wrap: wrap;
+            }
+
+            .review-control-wide {
+                width: 100%;
+                flex: 1 1 calc(50% - 10px);
+                min-width: 0;
+            }
+
+            .review-control-cost {
+                flex: 0 1 7rem;
+            }
+
+            .review-model-group {
+                gap: 10px;
+                flex: 1 1 calc(50% - 10px);
+                min-width: 0;
+            }
+
+            .review-control-action {
+                flex: 1 1 calc(50% - 10px);
+                min-width: 10rem;
+            }
+
+            .toolbar-row {
+                gap: 6px;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .btn-pro-standard,
+            .btn-pro-primary {
+                padding: 0 7px;
+                letter-spacing: 0.02em;
+            }
+
+            .review-control-wide,
+            .review-control-cost,
+            .review-control-action {
+                width: 100%;
+                flex: 1 1 100%;
+            }
+
+            .review-model-group {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .toolbar-row {
+                width: 100%;
+            }
+
+            .header-meta-row {
+                align-items: flex-start;
+            }
+        }
+
+        .btn-processing-loading {
+            background: var(--button-main) !important;
+            border: 1px solid var(--border-main) !important;
+            color: var(--text-soft) !important;
+            box-shadow: none !important;
+            transform: none !important;
+        }
+        .btn-processing-loading:hover,
+        .btn-processing-loading:active {
+            background: var(--button-main) !important;
+            color: var(--text-soft) !important;
+            transform: none !important;
+        }
+
+        .loading-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            min-width: 14px;
+        }
+        .loading-dots span {
+            opacity: 0.2;
+            animation: loading-dot-fade 1.2s infinite ease-in-out;
+        }
+        .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes loading-dot-fade {
+            0%, 80%, 100% { opacity: 0.2; }
+            40% { opacity: 1; }
+        }
+
+        .input-pro {
+            height: 32px;
+            background: var(--input-bg);
+            border: 1px solid var(--macos-border);
+            color: var(--text-main);
+            border-radius: 8px;
+            padding: 0 10px;
+            font-size: 12px;
+            outline: none;
+        }
+
+        .textarea-pro {
+            min-height: 140px;
+            background: var(--input-bg);
+            border: 1px solid var(--macos-border);
+            color: var(--text-main);
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 12px;
+            line-height: 1.5;
+            outline: none;
+            resize: vertical;
+            width: 100%;
+        }
+
+        .select-pro {
+            appearance: none;
+            background: var(--button-main);
+            border: 1px solid var(--border-main);
+            color: var(--text-main);
+            border-radius: 8px;
+            padding: 0 2rem 0 1rem;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2360a5fa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            outline: none;
+            cursor: pointer;
+            font-size: 11px;
+            height: 32px;
+        }
+
+        .sidebar-item { transition: all 0.2s; }
+        .sidebar-item:hover { background-color: rgba(255, 255, 255, 0.05); }
+        .sidebar-item.active { background-color: rgba(0, 122, 255, 0.2); color: #4facfe; }
+        body[data-theme="light"] .sidebar-item:hover { background-color: rgba(15, 23, 42, 0.05); }
+
+        .resizer { width: 2px; cursor: col-resize; background-color: var(--border-main); z-index: 10; }
+        .resizer:hover { background-color: var(--macos-accent); width: 4px; }
+
+        #preview-content h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; color: var(--preview-heading); border-bottom: 1px solid var(--border-main); padding-bottom: 0.5rem; }
+        #preview-content h2 { font-size: 1.25rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: #60a5fa; }
+        #preview-content h3 { font-size: 1rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; color: var(--preview-heading); }
+        #preview-content p { margin-bottom: 0.75rem; line-height: 1.6; color: var(--preview-text); }
+        #preview-content ul, #preview-content ol { margin-bottom: 0.75rem; padding-left: 1.5rem; color: var(--preview-text); }
+        #preview-content blockquote { border-left: 2px solid var(--macos-accent); padding-left: 1rem; margin-bottom: 0.75rem; color: var(--preview-text); }
+        #preview-content code { background: rgba(127, 127, 127, 0.18); padding: 0.1rem 0.35rem; border-radius: 4px; }
+        #preview-content pre { margin-bottom: 0.75rem; padding: 1rem; border-radius: 8px; background: var(--surface-card-alt); overflow: auto; }
+
+        .title-edit-active { background-color: #1a3a5a; outline: none; border-radius: 4px; padding: 2px 8px; box-shadow: 0 0 0 2px var(--macos-accent); }
+        .title-edit-active[data-empty="true"]::before {
+            content: attr(data-placeholder);
+            color: var(--text-soft);
+        }
+
+        .rail {
+            width: 48px;
+            background: var(--input-bg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 12px;
+            padding: 12px 8px;
+            border-right: 1px solid var(--border-main);
+            flex-shrink: 0;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+        .rail-right { border-right: none; border-left: 1px solid var(--border-main); }
+        .rail-left { border-left: none; border-right: 1px solid var(--border-main); }
+
+        .hidden-panel { display: none !important; }
+        .disabled-button { opacity: 0.45; pointer-events: none; }
+        .app-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.42);
+            backdrop-filter: blur(6px);
+            z-index: 100;
+        }
+        .app-modal-card {
+            width: 420px;
+            max-width: calc(100vw - 32px);
+            padding: 20px;
+            border-radius: 16px;
+            background: var(--surface-card);
+            border: 1px solid var(--border-soft);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+        }
+
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin-fast { animation: spin 1s linear infinite; }
     </style>
-  </head>
-  <body class="min-h-screen">
-    <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 space-y-6">
-      <section class="grid gap-6 lg:grid-cols-3">
-        <div class="glass-card rounded-2xl p-5 shadow-sm">
-          <h2 class="text-lg font-semibold">Recording</h2>
-          <div class="mt-4 flex flex-col items-center gap-3">
-            <button id="recording-toggle" class="record-button">Start</button>
-            <div id="recording-state-label" class="text-sm font-medium text-slate-700">Ready to record</div>
-            <div class="text-sm text-slate-600">Elapsed: <span id="elapsed-time">0s</span></div>
-            <button id="output-file-path" class="wrap-safe w-full text-center text-sm text-sky-700 hover:underline">Start recording to see the file path</button>
-          </div>
+</head>
+<body class="flex flex-col">
+    <header class="h-10 border-b flex items-center justify-between px-4 z-50" style="border-color: var(--border-soft); background: var(--surface-header);">
+        <div class="flex items-center gap-4">
+            <span class="text-xs font-semibold tracking-wider" style="color: var(--text-soft);">MEETLIFY PRO</span>
+        </div>
+        <div id="status-display" class="text-[11px] italic" style="color: var(--text-soft);">Ready</div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <aside id="sidebar-pane" class="border-r flex flex-col z-20" style="width: 256px; background: var(--surface-sidebar); border-color: var(--border-soft);">
+            <div class="p-4 border-b flex items-center justify-between gap-2" style="border-color: var(--border-soft);">
+                <button id="sidebar-new-recording" class="btn-pro-primary w-full h-10" type="button" style="background-color: #2563eb; color: white;">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                    NEW RECORDING
+                </button>
+            </div>
+
+            <div class="p-3 border-b flex-1 overflow-hidden flex flex-col" style="border-color: var(--border-soft);">
+                <div class="flex items-center justify-between mb-2 px-1 uppercase tracking-widest text-[10px] font-bold" style="color: var(--text-dim);">
+                    <div class="flex items-center gap-2">
+                        <span>Library</span>
+                        <button id="refresh-recordings" class="btn-pro-icon btn-pro-icon-tertiary h-7 w-7" type="button" title="Refresh library">
+                            <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                        </button>
+                    </div>
+                    <button id="collapse-sidebar" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted h-7 w-7" title="Collapse sidebar">
+                        <i data-lucide="panel-left-close" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <div id="recordings-list" class="space-y-1 overflow-y-auto no-scrollbar flex-1"></div>
+            </div>
+
+            <div class="mt-auto border-t p-3" style="border-color: var(--border-soft); background: var(--surface-muted);">
+                <button id="settings-toggle" type="button" class="w-full flex items-center justify-between text-xs hover:text-white mb-2" style="color: var(--text-soft);">
+                    <span class="flex items-center gap-2"><i data-lucide="settings" class="w-3.5 h-3.5"></i> Settings</span>
+                    <i data-lucide="chevron-up" id="settings-chevron" class="w-3 h-3 transform rotate-180 transition-transform"></i>
+                </button>
+                <div id="settings-panel" class="hidden space-y-3 pt-2">
+                    <div class="space-y-2">
+                        <label for="theme-mode" class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Theme</label>
+                        <select id="theme-mode" class="select-pro w-full">
+                            <option value="system">System</option>
+                            <option value="dark">Dark</option>
+                            <option value="light">Light</option>
+                        </select>
+                    </div>
+                    <div class="space-y-2">
+                        <label for="gemini-key" class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Gemini API Key</label>
+                        <input type="password" id="gemini-key" placeholder="Gemini API Key" class="input-pro w-full h-8">
+                        <div id="gemini-key-status" class="text-[10px]" style="color: var(--text-soft);">No Gemini API key saved yet.</div>
+                        <button id="save-api-key" type="button" class="btn-pro-standard w-full !text-zinc-300">SAVE KEY</button>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Transcription Prompt</div>
+                        <button id="open-transcription-prompt" type="button" class="btn-pro-standard w-full !text-zinc-300">EDIT PROMPT</button>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Permissions</div>
+                        <button id="check-permissions" type="button" class="btn-pro-standard w-full !text-zinc-300">SYSTEM AUDIO</button>
+                        <button id="request-mic-permission" type="button" class="btn-pro-standard w-full !text-zinc-300">MICROPHONE</button>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-dim);">Folders</div>
+                        <button id="select-folder" type="button" class="btn-pro-standard w-full !text-zinc-300">OPEN RECORDINGS</button>
+                        <button id="open-transcript-folder" type="button" class="btn-pro-standard w-full !text-zinc-300">OPEN TRANSCRIPTS</button>
+                        <div id="selected-folder-path" class="text-[10px] break-all" style="color: var(--text-soft);"></div>
+                        <div id="selected-transcripts-path" class="text-[10px] break-all" style="color: var(--text-soft);"></div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <div id="sidebar-resizer" class="resizer"></div>
+
+        <div id="sidebar-rail" class="rail rail-left hidden-panel" style="background: var(--surface-sidebar); border-color: var(--border-soft);">
+            <div class="w-full flex flex-col items-center pb-3 border-b" style="border-color: var(--border-soft);">
+                <button id="sidebar-rail-new-recording" type="button" class="btn-pro-icon h-8 w-8 p-0" style="background-color: #2563eb; border-color: #2563eb; color: white;">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="w-full flex flex-col items-center pt-3">
+                <button id="restore-sidebar" type="button" class="btn-pro-icon btn-system-secondary">
+                    <i data-lucide="panel-left-open" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <button id="sidebar-rail-settings" type="button" class="btn-pro-icon btn-system-secondary btn-icon-muted mt-auto mb-3">
+                <i data-lucide="settings" class="w-4 h-4"></i>
+            </button>
         </div>
 
-        <div class="glass-card rounded-2xl p-5 shadow-sm lg:col-span-2">
-          <h2 class="text-lg font-semibold">Recording Setup</h2>
-          <div class="setup-grid mt-4">
-            <div class="min-w-0">
-              <label for="recording-filename" class="mb-2 block text-sm font-medium">Filename</label>
-              <div class="filename-row">
-                <input type="text" id="recording-filename" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="team-sync-2026-02-17" />
-                <span class="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">.flac</span>
-              </div>
-            </div>
+        <main class="flex-1 relative" style="background: var(--surface-main);">
+            <section id="setup-view" class="absolute inset-0 p-8 flex flex-col items-center justify-center space-y-10">
+                <div class="w-full max-w-xl space-y-8 -mt-10">
+                    <div class="p-6 rounded-2xl shadow-2xl space-y-6" style="background: var(--surface-muted); border: 1px solid var(--border-soft);">
+                        <input type="text" id="record-filename" placeholder="Session title..." class="w-full text-xl font-medium p-3 rounded-xl outline-none" style="background: var(--surface-card-alt); color: var(--text-main); border: 1px solid var(--border-soft);">
+                        <select id="mic-select" class="select-pro w-full !h-14 text-lg">
+                            <option value="">No microphone</option>
+                        </select>
+                    </div>
 
-            <div class="min-w-0">
-              <label for="microphone-select" class="mb-2 block text-sm font-medium">Microphone</label>
-              <select id="microphone-select" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                <option value="">No microphone</option>
-              </select>
-            </div>
+                    <div class="flex flex-col items-center space-y-8">
+                        <div class="flex items-center gap-10">
+                            <button id="record-btn" type="button" class="h-24 w-24 rounded-full flex items-center justify-center transition-all group" style="background: var(--button-main); border: 1px solid var(--border-main); color: var(--text-soft);">
+                                <div id="record-icon" class="flex items-center justify-center">
+                                    <i data-lucide="mic" class="w-8 h-8 transition-transform group-active:scale-90"></i>
+                                </div>
+                            </button>
+                            <div class="flex flex-col">
+                                <span id="timer-display" class="text-6xl font-mono font-light leading-none tracking-tighter" style="color: var(--text-main);">00:00:00</span>
+                            </div>
+                        </div>
+                        <button id="output-file-path" type="button" class="text-xs underline-offset-2 hover:underline" style="color: var(--text-soft);">Start recording to see the file path</button>
+                        <div id="setup-meters" class="w-full space-y-4">
+                            <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--meter-bg);"><div id="meter-system" class="meter-fill bg-blue-500" style="width: 0%"></div></div>
+                            <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--meter-bg);"><div id="meter-mic" class="meter-fill bg-emerald-500" style="width: 0%"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-            <div class="min-w-0">
-              <label class="mb-2 block text-sm font-medium">Recordings Folder</label>
-              <div id="selected-folder-path" class="wrap-safe min-h-[2.5rem] rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"></div>
-              <button id="select-folder" class="mt-2 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Open Recordings Folder</button>
-            </div>
+            <section id="review-view" class="absolute inset-0 flex flex-col hidden overflow-hidden">
+                <div class="p-6 border-b space-y-4" style="border-color: var(--border-soft); background: var(--surface-muted);">
+                    <div class="header-meta-row">
+                        <div class="flex items-center gap-3 min-w-0 flex-1">
+                            <h1 id="review-title" contenteditable="false" class="text-2xl font-semibold truncate cursor-text transition-all" style="color: var(--text-main);">Select a file</h1>
+                            <button id="title-edit-button" type="button" class="p-1 hover:bg-zinc-800 rounded transition-colors" style="color: var(--text-soft);"><i data-lucide="pen" class="w-4 h-4" id="title-edit-icon"></i></button>
+                        </div>
+                        <div class="toolbar-row text-xs font-medium" style="color: var(--text-soft);">
+                            <span id="meta-date-time">-</span>
+                            <span class="px-2 py-0.5 rounded text-[10px] uppercase" style="background: var(--button-main); color: var(--text-soft); border: 1px solid var(--border-main);">Session</span>
+                        </div>
+                    </div>
 
-            <div class="min-w-0">
-              <label class="mb-2 block text-sm font-medium">Transcripts Folder</label>
-              <div id="selected-transcripts-path" class="wrap-safe min-h-[2.5rem] rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"></div>
-              <button id="open-transcript-folder" class="mt-2 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" disabled>
-                Open Transcript Folder
-              </button>
-            </div>
+                    <div id="review-player-box" class="flex items-center h-14 gap-4 rounded-xl px-4 border" style="background: var(--surface-card-alt); border-color: var(--border-soft);">
+                        <button id="player-toggle" type="button" class="w-10 h-10 flex items-center justify-center rounded-full transition-colors" style="background: var(--button-main); color: var(--text-main); border: 1px solid var(--border-main);">
+                            <i data-lucide="play" class="w-5 h-5 ml-0.5" id="player-toggle-icon"></i>
+                        </button>
+                        <div class="flex-1 flex flex-col gap-1.5">
+                            <button id="player-seek" type="button" class="h-2 rounded-full overflow-hidden relative cursor-pointer text-left" style="background: var(--meter-bg);">
+                                <div id="player-progress" class="h-full bg-zinc-500" style="width: 0%"></div>
+                            </button>
+                            <div class="flex justify-between text-[11px] font-mono" style="color: var(--text-soft);">
+                                <span id="current-time">00:00:00</span>
+                                <span id="player-duration-label">00:00:00</span>
+                            </div>
+                        </div>
+                        <audio id="recording-player" preload="metadata" class="hidden"></audio>
+                    </div>
 
-            <div class="xl:col-span-2">
-              <label class="mb-2 block text-sm font-medium">Permissions</label>
-              <div class="flex flex-wrap gap-2">
-                <button id="check-permissions" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
-                  Check Permissions
-                </button>
-                <button id="request-mic-permission" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
-                  Request Microphone Permission
-                </button>
-              </div>
-              <p class="mt-2 text-xs text-slate-500">Use this to trigger macOS permission prompts (Screen Recording + Microphone).</p>
-            </div>
-
-            <div class="xl:col-span-2">
-              <label for="gemini-api-key" class="mb-2 block text-sm font-medium">Gemini API Key</label>
-              <div class="flex flex-col gap-2 sm:flex-row">
-                <input
-                  type="password"
-                  id="gemini-api-key"
-                  class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Paste your Gemini API key"
-                  autocomplete="off"
-                  spellcheck="false"
-                />
-                <button id="save-gemini-api-key" class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">
-                  Save Key
-                </button>
-              </div>
-              <p id="gemini-api-key-status" class="mt-2 text-xs text-slate-500">No Gemini API key saved yet.</p>
-            </div>
-
-            <div class="xl:col-span-2">
-              <div class="meter-grid">
-                <div>
-                  <div class="mb-1 text-sm font-medium">System Audio Level</div>
-                  <div class="h-3 overflow-hidden rounded-full bg-slate-200">
-                    <div id="system-level-fill" class="meter-fill h-full w-0 bg-sky-500"></div>
-                  </div>
+                    <div class="review-controls-row">
+                        <div class="review-control-wide h-12 flex items-center justify-between px-4 rounded-xl border text-sm font-mono" style="background: var(--surface-card-alt); border-color: var(--border-soft); color: var(--text-soft);">
+                            <div id="meta-size">-</div>
+                            <div id="meta-duration-static">-</div>
+                        </div>
+                        <div class="review-model-group">
+                            <select id="model-select" class="select-pro review-control-wide !h-12" style="background-color: var(--surface-card-alt);">
+                                    <option value="">Loading Gemini models...</option>
+                            </select>
+                            <div id="cost-estimate" class="review-control-cost h-12 flex items-center justify-center px-4 rounded-xl border text-[11px] font-mono" style="background: var(--surface-card-alt); border-color: var(--border-soft); color: var(--text-soft);">€0.000</div>
+                        </div>
+                        <button id="process-btn" type="button" class="btn-pro-primary review-control-action !h-11 self-center">
+                            <span id="process-btn-text">TRANSCRIBE</span>
+                        </button>
+                    </div>
                 </div>
 
-                <div>
-                  <div class="mb-1 text-sm font-medium">Microphone Level</div>
-                  <div class="h-3 overflow-hidden rounded-full bg-slate-200">
-                    <div id="mic-level-fill" class="meter-fill h-full w-0 bg-emerald-500"></div>
-                  </div>
+                <div class="flex-1 flex overflow-hidden" id="workspace-container">
+                    <div id="editor-rail" class="rail hidden">
+                        <button id="restore-editor" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="panel-left-open" class="w-4 h-4"></i></button>
+                    </div>
+
+                    <div id="editor-pane" class="flex flex-col border-r" style="flex: 1 1 50%; border-color: var(--border-soft);">
+                        <div class="min-h-11 py-2 flex items-start justify-between gap-3 px-3 border-b flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
+                            <div class="toolbar-row">
+                                <button id="collapse-editor" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted" title="Collapse editor"><i data-lucide="panel-left-close" class="w-3.5 h-3.5"></i></button>
+                                <span class="text-[10px] font-bold uppercase tracking-widest ml-1" style="color: var(--text-soft);">Edit</span>
+                                <div class="w-px h-4 mx-2" style="background: var(--border-main);"></div>
+                                <button id="undo-btn" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="undo" class="w-3.5 h-3.5"></i></button>
+                                <button id="redo-btn" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="redo" class="w-3.5 h-3.5"></i></button>
+                                <div class="w-px h-4 mx-2" style="background: var(--border-main);"></div>
+                                <button id="toggle-find" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="search" class="w-3.5 h-3.5"></i></button>
+                                <button id="toggle-labels" type="button" class="btn-pro-standard btn-system-secondary ml-1">
+                                    <i data-lucide="users" class="w-3.5 h-3.5"></i> LABELS
+                                </button>
+                            </div>
+                            <button id="save-btn" type="button" class="btn-pro-standard btn-system-primary btn-save-compact w-24">
+                                <span id="save-btn-text">SAVE</span>
+                                <i id="save-btn-icon" data-lucide="check" class="w-4 h-4 hidden"></i>
+                            </button>
+                        </div>
+
+                        <div id="find-bar" class="hidden p-3 border-b space-y-3 flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
+                            <div class="toolbar-row">
+                                <input type="text" id="find-input" placeholder="Search..." class="input-pro w-52">
+                                <button id="find-now" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="search" class="w-3.5 h-3.5"></i></button>
+                                <button id="search-prev" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="chevron-up" class="w-3.5 h-3.5"></i></button>
+                                <button id="search-next" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></button>
+                            </div>
+                            <div class="toolbar-row">
+                                <input type="text" id="replace-input" placeholder="Replace with..." class="input-pro w-52">
+                                <button id="replace-one" type="button" class="btn-pro-standard btn-system-secondary">REPLACE</button>
+                                <button id="replace-all" type="button" class="btn-pro-standard btn-system-secondary">REPLACE ALL</button>
+                            </div>
+                            <div id="search-status" class="text-[11px]" style="color: var(--text-soft);"></div>
+                        </div>
+
+                        <div id="labels-bar" class="hidden p-3 border-b toolbar-row flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
+                            <select id="speaker-dropdown" class="select-pro w-40">
+                                <option value="">Choose speaker...</option>
+                            </select>
+                            <input type="text" id="speaker-label" placeholder="Custom label..." class="hidden input-pro w-24">
+                            <i data-lucide="arrow-right" class="w-4 h-4" style="color: var(--text-soft);"></i>
+                            <input type="text" id="speaker-name" placeholder="Name..." class="input-pro w-32">
+                            <button id="replace-speaker" type="button" class="btn-pro-standard btn-system-secondary px-6">RENAME</button>
+                        </div>
+
+                        <textarea id="markdown-editor" spellcheck="false" class="flex-1 p-6 text-sm font-mono leading-relaxed resize-none border-none outline-none placeholder:text-zinc-800" style="background: var(--surface-main); color: var(--text-main);"></textarea>
+                    </div>
+
+                    <div id="resizer" class="resizer"></div>
+
+                    <div id="preview-pane" class="flex flex-col" style="flex: 1 1 50%; background: var(--surface-sidebar);">
+                        <div class="min-h-11 py-2 flex items-start justify-between gap-3 px-3 border-b flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
+                             <div class="toolbar-row">
+                                <button id="collapse-preview" type="button" class="btn-pro-icon btn-system-tertiary btn-pane-toggle btn-icon-muted" title="Collapse preview"><i data-lucide="panel-right-close" class="w-3.5 h-3.5"></i></button>
+                                <span class="text-[10px] font-bold uppercase tracking-widest ml-1" style="color: var(--text-soft);">Preview</span>
+                             </div>
+                             <div class="toolbar-row justify-end">
+                                <button id="copy-markdown" type="button" class="btn-pro-standard btn-system-tertiary font-normal h-7">
+                                    <i data-lucide="copy" class="w-3 h-3"></i> MD
+                                </button>
+                                <button id="export-mp3" type="button" class="btn-pro-standard btn-system-tertiary font-normal h-7">
+                                    <i data-lucide="download" class="w-3 h-3"></i> MP3
+                                </button>
+                             </div>
+                        </div>
+                        <div class="flex-1 p-8 overflow-y-auto prose prose-sm max-w-none no-scrollbar" id="preview-content"></div>
+                    </div>
+
+                    <div id="preview-rail" class="rail rail-right hidden">
+                        <button id="restore-preview" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="panel-right-open" class="w-4 h-4"></i></button>
+                    </div>
                 </div>
-              </div>
+            </section>
+
+            <section id="prompt-view" class="absolute inset-0 flex flex-col hidden overflow-hidden">
+                <div class="p-6 border-b space-y-4" style="border-color: var(--border-soft); background: var(--surface-muted);">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <h1 class="text-2xl font-semibold truncate" style="color: var(--text-main);">Transcription Prompt</h1>
+                        </div>
+                        <button id="close-prompt-view" type="button" class="btn-pro-standard btn-system-tertiary h-8">Back</button>
+                    </div>
+                    <div class="text-xs" style="color: var(--text-soft);">
+                        Edit the Gemini transcription system prompt used for future transcriptions.
+                    </div>
+                </div>
+
+                <div class="flex-1 flex overflow-hidden">
+                    <div class="flex flex-col w-full">
+                        <div class="min-h-11 py-2 flex items-start justify-between gap-3 px-3 border-b flex-shrink-0" style="background: var(--surface-muted); border-color: var(--border-soft);">
+                            <div class="flex items-center gap-1">
+                                <span class="text-[10px] font-bold uppercase tracking-widest ml-1" style="color: var(--text-soft);">Prompt</span>
+                                <div class="w-px h-4 mx-2" style="background: var(--border-main);"></div>
+                                <button id="prompt-undo-btn" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="undo" class="w-3.5 h-3.5"></i></button>
+                                <button id="prompt-redo-btn" type="button" class="btn-pro-icon btn-system-secondary"><i data-lucide="redo" class="w-3.5 h-3.5"></i></button>
+                            </div>
+                            <button id="save-transcription-prompt" type="button" class="btn-pro-standard btn-system-primary btn-save-compact w-28">
+                                <span id="save-transcription-prompt-text">SAVE</span>
+                                <i id="save-transcription-prompt-icon" data-lucide="check" class="w-4 h-4 hidden"></i>
+                            </button>
+                        </div>
+                        <textarea id="transcription-prompt" class="flex-1 p-6 text-sm font-mono leading-relaxed resize-none border-none outline-none" style="background: var(--surface-main); color: var(--text-main);" spellcheck="false"></textarea>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="mp3-export-modal" class="app-modal-backdrop hidden-panel">
+        <div class="app-modal-card space-y-4">
+            <div class="space-y-1">
+                <h2 class="text-sm font-semibold" style="color: var(--text-main);">Export MP3</h2>
+                <p class="text-xs leading-5" style="color: var(--text-soft);">Choose whether you want one MP3 file or chunked MP3 files for the selected recording.</p>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="glass-card rounded-2xl p-5 shadow-sm">
-        <div class="section-shell">
-          <div id="processing-status-card" class="status-card">
-            <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</div>
-            <div id="processing-status" class="wrap-safe mt-2 text-sm text-slate-700">Idle</div>
-          </div>
-
-          <div class="min-w-0">
-            <label for="recording-select" class="mb-2 block text-sm font-medium">Recordings</label>
-            <div class="flex gap-2">
-              <select id="recording-select" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                <option value="">No recordings found</option>
-              </select>
-              <button id="refresh-recordings" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Refresh</button>
+            <div class="flex gap-3">
+                <button id="mp3-export-single" type="button" class="btn-pro-standard btn-system-secondary flex-1 h-10">Single MP3</button>
+                <button id="mp3-export-chunked" type="button" class="btn-pro-standard btn-system-secondary flex-1 h-10">Chunked MP3</button>
             </div>
-            <div id="recording-meta" class="wrap-safe mt-3 text-sm text-slate-600"></div>
-          </div>
-
-          <div class="actions-grid">
-            <div class="utility-card">
-              <label class="mb-2 block text-sm font-medium">Gemini Processing</label>
-              <div class="flex items-center gap-2">
-                <select id="model-select" class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                </select>
-                <button id="process-recording" class="shrink-0 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50">
-                  Process
-                </button>
-              </div>
+            <div class="flex justify-end">
+                <button id="mp3-export-cancel" type="button" class="btn-pro-standard btn-system-tertiary h-8">Cancel</button>
             </div>
+        </div>
+    </div>
 
-            <div class="utility-card">
-              <label class="mb-2 block text-sm font-medium">MP3 Export</label>
-              <div class="space-y-4">
-                <button id="export-mp3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-white disabled:cursor-not-allowed disabled:opacity-50">
-                  Download MP3
-                </button>
-                <label for="chunk-mp3" class="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-                  <input id="chunk-mp3" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" />
-                  Chunk into &lt;= 90 MB pieces for AI uploads
-                </label>
-              </div>
+    <div id="retranscribe-modal" class="app-modal-backdrop hidden-panel">
+        <div class="app-modal-card space-y-4">
+            <div class="space-y-1">
+                <h2 class="text-sm font-semibold" style="color: var(--text-main);">Overwrite transcript?</h2>
+                <p class="text-xs leading-5" style="color: var(--text-soft);">This recording already has a transcript. Retranscribing will replace the existing transcript content.</p>
             </div>
-          </div>
+            <div class="flex gap-3">
+                <button id="retranscribe-confirm" type="button" class="btn-pro-standard btn-system-secondary flex-1 h-10">Override</button>
+                <button id="retranscribe-cancel" type="button" class="btn-pro-standard btn-system-tertiary h-10">Cancel</button>
+            </div>
         </div>
-
-        <div id="player-shell" class="player-shell mt-4 is-empty">
-          <audio id="recording-player" controls preload="metadata"></audio>
-        </div>
-      </section>
-
-      <section class="glass-card rounded-2xl p-5 shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-lg font-semibold">Transcript Editor</h2>
-          <button id="save-markdown" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" disabled>
-            Save Transcript
-          </button>
-        </div>
-
-        <div class="mt-4 grid gap-3 lg:grid-cols-6">
-          <input id="search-input" type="text" class="rounded-lg border border-slate-300 px-3 py-2 text-sm lg:col-span-2" placeholder="Search" />
-          <input id="replace-input" type="text" class="rounded-lg border border-slate-300 px-3 py-2 text-sm lg:col-span-2" placeholder="Replace with" />
-          <button id="search-prev" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Prev</button>
-          <button id="search-next" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Next</button>
-          <button id="replace-one" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Replace Current</button>
-          <button id="replace-all" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Replace All</button>
-        </div>
-
-        <div id="search-status" class="mt-2 text-sm text-slate-600"></div>
-
-        <div class="mt-4 grid gap-4 lg:grid-cols-2">
-          <div>
-            <label for="markdown-editor" class="mb-2 block text-sm font-medium">Markdown</label>
-            <textarea id="markdown-editor" class="h-[420px] w-full rounded-lg border border-slate-300 p-3 font-mono text-xs" placeholder="Transcript markdown will appear here..."></textarea>
-          </div>
-
-          <div>
-            <label class="mb-2 block text-sm font-medium">Preview</label>
-            <div id="markdown-preview" class="prose prose-slate h-[420px] max-w-none overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm"></div>
-          </div>
-        </div>
-      </section>
     </div>
 
     <script src="./renderer.js"></script>
-  </body>
+</body>
 </html>
