@@ -40,7 +40,7 @@ const TRANSCRIPTION_MODELS = [
   },
 ];
 
-const DEFAULT_TRANSCRIPTION_MODEL = "gemini-2.5-flash";
+const DEFAULT_TRANSCRIPTION_MODEL = "gemini-3-flash-preview";
 const METADATA_MODEL = "gemini-2.5-flash";
 
 const getTranscriptionModels = () => TRANSCRIPTION_MODELS.map((model) => ({ ...model }));

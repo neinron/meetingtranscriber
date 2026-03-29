@@ -2,9 +2,9 @@ const { spawn, execFile } = require("node:child_process");
 const util = require("node:util");
 const fs = require("fs");
 const path = require("path");
-const { dialog } = require("electron");
 const { checkPermissions } = require("./permission");
-const { getRecorderBinaryPath, getPermissionDeniedScreenPath, getRecordingScreenPath } = require("./paths");
+const { getRecorderBinaryPath } = require("./paths");
+const { appendInternalLog } = require("./internal-log");
 const execFileAsync = util.promisify(execFile);
 
 let recordingProcess = null;
@@ -22,6 +22,7 @@ let recorderLastStartError = "";
 let desiredFinalFilename = "";
 
 const sendStatus = (status, timestamp = Date.now(), filepath = null, details = "") => {
+  appendInternalLog("recording-send-status", status, { timestamp, filepath, details });
   if (typeof statusObserver === "function") {
     try {
       statusObserver({ status, timestamp, filepath, details });
@@ -202,16 +203,25 @@ const initRecording = (filepath, filename, micDeviceId) => {
     }
 
     recordingProcess = spawn(getRecorderBinaryPath(), args);
+    appendInternalLog("recording-spawn", "Recorder process started", {
+      pid: recordingProcess.pid,
+      recorderBinaryPath: getRecorderBinaryPath(),
+      args,
+    });
     const currentProcess = recordingProcess;
 
     recordingProcess.stdout.on("data", (data) => {
-      stdoutBuffer += data.toString();
+      const chunk = data.toString();
+      stdoutBuffer += chunk;
       const lines = stdoutBuffer.split("\n");
       stdoutBuffer = lines.pop() ?? "";
 
       const responses = lines.map(parseJsonLine).filter(Boolean);
 
       for (const response of responses) {
+        if (response.code !== "AUDIO_LEVELS") {
+          appendInternalLog("recording-response", response.code || "UNKNOWN", response);
+        }
         if (response.code === "RECORDING_STARTED") {
           const timestamp = new Date(response.timestamp).getTime();
           hasStarted = true;
@@ -225,9 +235,26 @@ const initRecording = (filepath, filename, micDeviceId) => {
 
         if (response.code === "RECORDING_STOPPED") {
           const timestamp = new Date(response.timestamp).getTime();
-          const stopDetails = recorderLastError;
-          const finalizedPath = stopDetails ? response.path : finalizeRecordingPath(response.path);
-          sendStatus("STOP_RECORDING", timestamp, finalizedPath);
+          let stopDetails = recorderLastError;
+          const responsePath = response.path || currentRecordingPath || null;
+          let finalizedPath = responsePath;
+
+          if (!stopDetails && response.finalized === false) {
+            stopDetails = "Final recording file is missing.";
+          }
+
+          if (!stopDetails && responsePath) {
+            finalizedPath = finalizeRecordingPath(responsePath);
+            if (!finalizedPath || !fs.existsSync(finalizedPath)) {
+              stopDetails = recorderLastError || "Final recording file is missing.";
+            }
+          }
+
+          if (stopDetails && !finalizedPath) {
+            finalizedPath = responsePath;
+          }
+
+          sendStatus("STOP_RECORDING", timestamp, finalizedPath, stopDetails);
           if (stopDetails) {
             sendStatus("RECORDING_STOPPED_UNEXPECTEDLY", timestamp, finalizedPath, stopDetails);
           }
@@ -243,6 +270,19 @@ const initRecording = (filepath, filename, micDeviceId) => {
 
         if (response.code === "AUDIO_LEVELS") {
           sendAudioLevels(response.systemLevel || 0, response.micLevel || 0);
+          continue;
+        }
+
+        if (response.code === "STREAM_DIAGNOSTICS" || response.code === "SYSTEM_EVENT") {
+          continue;
+        }
+
+        if (response.code === "STREAM_RECOVERED") {
+          recorderLastError = "";
+          continue;
+        }
+
+        if (response.code === "RECORDER_RUNTIME_ERROR" && response.recoveryAttempt) {
           continue;
         }
 
@@ -269,16 +309,23 @@ const initRecording = (filepath, filename, micDeviceId) => {
     });
 
     recordingProcess.stderr.on("data", (data) => {
-      stderrBuffer += data.toString();
+      const chunk = data.toString();
+      stderrBuffer += chunk;
+      const trimmedChunk = chunk.trim();
+      if (trimmedChunk) {
+        appendInternalLog("recording-stderr", "stderr chunk", { chunk: trimmedChunk });
+      }
     });
 
     recordingProcess.on("error", (error) => {
+      appendInternalLog("recording-process-error", "Process error", { message: error.message });
       recorderLastError = `Recorder process failed to start: ${error.message}`;
       recorderLastStartError = recorderLastError;
       sendStatus("START_FAILED", Date.now(), null, recorderLastStartError);
       resolveOnce(false);
     });
     recordingProcess.on("exit", (code, signal) => {
+      appendInternalLog("recording-exit", "Recorder exited", { code, signal, hasStarted, recorderLastError, stderr: stderrBuffer.trim() });
       if (recordingProcess === currentProcess) {
         recordingProcess = null;
       }
@@ -333,9 +380,6 @@ module.exports.startRecording = async ({ filepath, filename, micDeviceId }) => {
   }
 
   if (!isPermissionGranted) {
-    if (global.mainWindow && !global.mainWindow.isDestroyed()) {
-      global.mainWindow.loadFile(getPermissionDeniedScreenPath());
-    }
     sendStatus("START_FAILED", Date.now(), null, "Grant screen recording permission in System Settings and retry.");
 
     return;

@@ -66,7 +66,6 @@ Optional environment overrides:
 `ffmpeg` is used for:
 
 - MP3 export
-- final system + microphone mix when both inputs are recorded
 
 ## Setup
 
@@ -103,6 +102,25 @@ npm run swift:make
 
 and then a full app restart
 
+## Docker Workflow
+
+This repository now includes a small Docker-based tooling environment:
+
+```bash
+npm run docker:build
+npm run docker:shell
+```
+
+Use it for repeatable repo tooling such as inspecting files, running generic Node scripts, and using `ffmpeg` in a clean container.
+
+The npm scripts automatically use `docker compose` when available and fall back to `docker-compose` on older installations.
+
+Important limitation:
+
+- the actual app runtime is still macOS-only
+- ScreenCaptureKit, Electron packaging for macOS, and `swiftc` builds of `src/swift/Recorder.swift` must run on the macOS host
+- do not treat the container as a replacement for the native app environment
+
 ## Packaging
 
 Build a packaged app bundle:
@@ -127,6 +145,15 @@ Meetlify needs:
 
 - `System Audio` / Screen Recording permission to capture macOS output audio
 - Microphone permission if microphone capture is enabled
+
+## Audio Pipeline
+
+The recording path now mirrors the core approach used in `meetily` more closely:
+
+- system audio and microphone are captured independently at 48 kHz
+- the final merge happens in-process in Swift
+- the mixer applies fixed headroom and a simple limiter to avoid the clipping that a raw `amix` pass can introduce
+- `ffmpeg` remains an export dependency for MP3 output, not for the core recording path
 
 The app exposes permission actions in the settings panel.
 

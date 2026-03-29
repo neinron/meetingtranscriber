@@ -9,14 +9,22 @@ const markdownParser = new MarkdownIt({
 });
 
 const HISTORY_LIMIT = 100;
+const DEBUG_ENTRY_LIMIT = 400;
 const DISCLOSURE_SETTINGS_PANEL = "settingsPanel";
 const SYSTEM_THEME_QUERY = window.matchMedia("(prefers-color-scheme: dark)");
+const nativeConsole = {
+  log: console.log.bind(console),
+  info: console.info.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+};
 
 let selectedFolderPath = "";
 let transcriptsFolderPath = "";
 let recordingFilename = "";
 let selectedMicDeviceId = "";
 let selectedRendererMicDeviceId = "";
+let currentRecordingId = "";
 let recordings = [];
 let selectedRecordingId = "";
 let transcriptPath = null;
@@ -57,6 +65,7 @@ let lastSplit = 50;
 let isPlaybackLoading = false;
 let pendingMp3ExportResolve = null;
 let pendingRetranscribeResolve = null;
+let pendingDeleteResolve = null;
 let sidebarWidth = 256;
 let previousReviewTitle = "";
 let selectionRequestId = 0;
@@ -66,10 +75,29 @@ let currentStatusMessage = "Ready";
 let isEditingRecordingTitle = false;
 let hasCustomRecordingFilename = false;
 let recordingFilenameClockTimer = null;
+let isStartingTranscription = false;
+let isStoppingTranscription = false;
+let appShellState = "booting";
+let appPermissions = null;
+let bootstrapSessionState = {
+  selectedRecordingId: "",
+  lastPrimaryView: "setup",
+};
+let refreshRecordingsTimer = null;
+let refreshRecordingsPromise = Promise.resolve();
+let defaultTranscriptionModelId = "";
+let debugConsoleOpen = false;
+let debugConsoleEntries = [];
+let debugConsoleHooksInstalled = false;
+
+const BUSY_RECORDING_STATUSES = new Set(["recording", "stopping", "finalizing", "importing", "transcribing"]);
+const HEAVY_SELECTION_BLOCKED_STATUSES = new Set(["recording", "stopping", "finalizing", "importing", "transcribing"]);
 
 const statusDisplayEl = document.getElementById("status-display");
 const sidebarNewRecordingEl = document.getElementById("sidebar-new-recording");
 const sidebarRailNewRecordingEl = document.getElementById("sidebar-rail-new-recording");
+const importRecordingsEl = document.getElementById("import-recordings");
+const sidebarRailImportRecordingsEl = document.getElementById("sidebar-rail-import-recordings");
 const refreshRecordingsEl = document.getElementById("refresh-recordings");
 const recordingsListEl = document.getElementById("recordings-list");
 const sidebarPaneEl = document.getElementById("sidebar-pane");
@@ -164,6 +192,7 @@ const previewRailEl = document.getElementById("preview-rail");
 const restorePreviewEl = document.getElementById("restore-preview");
 const copyMarkdownEl = document.getElementById("copy-markdown");
 const exportMp3El = document.getElementById("export-mp3");
+const deleteRecordingEl = document.getElementById("delete-recording");
 const previewContentEl = document.getElementById("preview-content");
 const workspaceContainerEl = document.getElementById("workspace-container");
 const mp3ExportModalEl = document.getElementById("mp3-export-modal");
@@ -173,12 +202,32 @@ const mp3ExportCancelEl = document.getElementById("mp3-export-cancel");
 const retranscribeModalEl = document.getElementById("retranscribe-modal");
 const retranscribeConfirmEl = document.getElementById("retranscribe-confirm");
 const retranscribeCancelEl = document.getElementById("retranscribe-cancel");
+const deleteRecordingModalEl = document.getElementById("delete-recording-modal");
+const deleteRecordingNameEl = document.getElementById("delete-recording-name");
+const deleteRecordingConfirmEl = document.getElementById("delete-recording-confirm");
+const deleteRecordingCancelEl = document.getElementById("delete-recording-cancel");
 const openTranscriptionPromptEl = document.getElementById("open-transcription-prompt");
 const closePromptViewEl = document.getElementById("close-prompt-view");
 const promptUndoBtnEl = document.getElementById("prompt-undo-btn");
 const promptRedoBtnEl = document.getElementById("prompt-redo-btn");
 const saveTranscriptionPromptTextEl = document.getElementById("save-transcription-prompt-text");
 const saveTranscriptionPromptIconEl = document.getElementById("save-transcription-prompt-icon");
+const appStateOverlayEl = document.getElementById("app-state-overlay");
+const appStateEyebrowEl = document.getElementById("app-state-eyebrow");
+const appStateTitleEl = document.getElementById("app-state-title");
+const appStateBodyEl = document.getElementById("app-state-body");
+const appStatePrimaryEl = document.getElementById("app-state-primary");
+const appStateSecondaryEl = document.getElementById("app-state-secondary");
+const reviewWarningBannerEl = document.getElementById("review-warning-banner");
+const reviewWarningTextEl = document.getElementById("review-warning-text");
+const reviewWarningRetryEl = document.getElementById("review-warning-retry");
+const reviewWarningAcceptEl = document.getElementById("review-warning-accept");
+const toggleDebugConsoleEl = document.getElementById("toggle-debug-console");
+const debugConsolePanelEl = document.getElementById("debug-console-panel");
+const debugConsoleOutputEl = document.getElementById("debug-console-output");
+const copyDebugConsoleEl = document.getElementById("copy-debug-console");
+const clearDebugConsoleEl = document.getElementById("clear-debug-console");
+const closeDebugConsoleEl = document.getElementById("close-debug-console");
 
 const renderIcons = () => {
   if (window.lucide?.createIcons) {
@@ -201,6 +250,311 @@ const renderStatusMessage = () => {
 const setStatusMessage = (message) => {
   currentStatusMessage = message;
   renderStatusMessage();
+};
+
+const setSelectedRecordingId = (nextRecordingId, { persist = true } = {}) => {
+  selectedRecordingId = nextRecordingId || "";
+  if (persist) {
+    persistAppSessionState();
+  }
+};
+
+const persistAppSessionState = () => ipcRenderer.invoke("set-app-session-state", {
+  selectedRecordingId,
+  lastPrimaryView: previousPrimaryView,
+}).catch(() => {});
+
+const stringifyDebugValue = (value) => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value instanceof Error) {
+    return value.stack || value.message;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const normalizeDebugEntry = (entry) => {
+  const payload = entry?.payload && typeof entry.payload === "object" ? { ...entry.payload } : {};
+  delete payload.sessionId;
+  const extra = Object.keys(payload).length ? stringifyDebugValue(payload) : "";
+  const timestamp = entry?.timestamp || new Date().toISOString();
+  const scope = entry?.scope || entry?.source || "renderer";
+  const message = String(entry?.message || "").trim();
+  const level = entry?.level || (
+    /error|failed|exception|rejection/i.test(scope) ? "error"
+      : (/warn|validation|needs_review/i.test(scope) ? "warn" : "info")
+  );
+
+  return {
+    timestamp,
+    scope,
+    message,
+    extra,
+    level,
+  };
+};
+
+const renderDebugConsole = () => {
+  if (!debugConsoleOutputEl) {
+    return;
+  }
+
+  debugConsoleOutputEl.innerHTML = "";
+  if (!debugConsoleEntries.length) {
+    const emptyEl = document.createElement("div");
+    emptyEl.className = "debug-console-empty";
+    emptyEl.textContent = "Debug mode is active. New log entries will appear here.";
+    debugConsoleOutputEl.appendChild(emptyEl);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  debugConsoleEntries.forEach((entry) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = `debug-console-entry ${entry.level === "error" ? "debug-error" : entry.level === "warn" ? "debug-warn" : ""}`.trim();
+
+    const metaEl = document.createElement("div");
+    metaEl.className = "debug-console-meta";
+    const timeEl = document.createElement("span");
+    timeEl.textContent = new Date(entry.timestamp).toLocaleTimeString();
+    const scopeEl = document.createElement("span");
+    scopeEl.className = "debug-console-scope";
+    scopeEl.textContent = entry.scope;
+    metaEl.append(timeEl, scopeEl);
+
+    const bodyEl = document.createElement("div");
+    bodyEl.textContent = entry.extra ? `${entry.message}\n${entry.extra}`.trim() : entry.message;
+
+    rowEl.append(metaEl, bodyEl);
+    fragment.appendChild(rowEl);
+  });
+
+  debugConsoleOutputEl.appendChild(fragment);
+  debugConsoleOutputEl.scrollTop = debugConsoleOutputEl.scrollHeight;
+};
+
+const appendDebugEntry = (entry) => {
+  debugConsoleEntries.push(normalizeDebugEntry(entry));
+  if (debugConsoleEntries.length > DEBUG_ENTRY_LIMIT) {
+    debugConsoleEntries = debugConsoleEntries.slice(-DEBUG_ENTRY_LIMIT);
+  }
+  renderDebugConsole();
+};
+
+const setDebugConsoleOpen = (open) => {
+  debugConsoleOpen = Boolean(open);
+  debugConsolePanelEl?.classList.toggle("hidden-panel", !debugConsoleOpen);
+};
+
+const loadDebugConsoleHistory = async () => {
+  try {
+    const result = await ipcRenderer.invoke("get-recent-internal-logs", { limit: 150 });
+    debugConsoleEntries = Array.isArray(result?.entries) ? result.entries.map(normalizeDebugEntry) : [];
+    renderDebugConsole();
+  } catch (error) {
+    appendDebugEntry({
+      scope: "debug-console",
+      message: "Failed to load debug history.",
+      payload: { error: error?.message || String(error) },
+      level: "warn",
+    });
+  }
+};
+
+const installDebugConsoleHooks = () => {
+  if (debugConsoleHooksInstalled) {
+    return;
+  }
+  debugConsoleHooksInstalled = true;
+
+  ["log", "info", "warn", "error"].forEach((method) => {
+    console[method] = (...args) => {
+      nativeConsole[method](...args);
+      appendDebugEntry({
+        scope: `renderer:${method}`,
+        message: args.map(stringifyDebugValue).join(" "),
+        level: method === "error" ? "error" : method === "warn" ? "warn" : "info",
+      });
+    };
+  });
+
+  window.addEventListener("error", (event) => {
+    appendDebugEntry({
+      scope: "renderer:error",
+      message: event.message || "Unhandled renderer error",
+      payload: {
+        filename: event.filename || "",
+        lineno: event.lineno || 0,
+        colno: event.colno || 0,
+      },
+      level: "error",
+    });
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    appendDebugEntry({
+      scope: "renderer:unhandledrejection",
+      message: stringifyDebugValue(event.reason),
+      level: "error",
+    });
+  });
+};
+
+const setAppStateOverlay = ({
+  visible = false,
+  eyebrow = "App State",
+  title = "",
+  body = "",
+  primaryLabel = "",
+  secondaryLabel = "",
+} = {}) => {
+  appStateOverlayEl.classList.toggle("hidden-panel", !visible);
+  appStateEyebrowEl.textContent = eyebrow;
+  appStateTitleEl.textContent = title;
+  appStateBodyEl.textContent = body;
+  appStatePrimaryEl.classList.toggle("hidden-panel", !primaryLabel);
+  appStateSecondaryEl.classList.toggle("hidden-panel", !secondaryLabel);
+  appStatePrimaryEl.textContent = primaryLabel || "Continue";
+  appStateSecondaryEl.textContent = secondaryLabel || "Cancel";
+};
+
+const updateShellState = (nextState = "setup") => {
+  appShellState = nextState;
+
+  if (nextState === "booting") {
+    setAppStateOverlay({
+      visible: true,
+      eyebrow: "Boot",
+      title: "Starting Meetlify",
+      body: "Loading your library, recorder state, and current session.",
+    });
+    return;
+  }
+
+  if (nextState === "needs_screen_permission") {
+    setAppStateOverlay({
+      visible: true,
+      eyebrow: "Permissions",
+      title: "Screen Recording Permission Required",
+      body: "Grant screen recording access to capture system audio and start recordings.",
+      primaryLabel: "Grant Screen Access",
+    });
+    return;
+  }
+
+  if (nextState === "needs_mic_permission") {
+    setAppStateOverlay({
+      visible: true,
+      eyebrow: "Permissions",
+      title: "Microphone Permission Required",
+      body: "Grant microphone access if you want Meetlify to capture your microphone input.",
+      primaryLabel: "Grant Microphone Access",
+      secondaryLabel: "Continue Without Mic",
+    });
+    return;
+  }
+
+  if (nextState === "recovering") {
+    setAppStateOverlay({
+      visible: true,
+      eyebrow: "Recovery",
+      title: "Recovering Session State",
+      body: "Meetlify is reconciling recordings and background tasks from the previous session.",
+    });
+    return;
+  }
+
+  setAppStateOverlay({ visible: false });
+};
+
+const applyPermissionSummary = (permissions) => {
+  appPermissions = permissions || appPermissions;
+};
+
+const shouldBlockSelectionHeavyLoad = (recording) => HEAVY_SELECTION_BLOCKED_STATUSES.has(recording?.status);
+
+const formatQualityFlag = (flag) => {
+  const lookup = {
+    invalid_timestamp: "timestamps could not be parsed",
+    timestamps_non_monotonic: "timestamps are out of order",
+    missing_diarized_lines: "speaker diarization is missing",
+    mixed_format_output: "output format is inconsistent",
+    summary_like_output: "content reads like a summary instead of a transcript",
+    coverage_too_low: "timestamps cover too little of the audio",
+    coverage_too_high: "timestamps exceed the audio duration",
+    density_too_high: "transcript density is implausibly high",
+    density_too_low: "transcript density is implausibly low",
+    too_few_transcript_segments: "too few transcript segments were detected",
+  };
+
+  return lookup[flag] || String(flag || "").replace(/_/gu, " ");
+};
+
+const updateReviewWarningState = (recording = getSelectedRecording()) => {
+  const isNeedsReview = recording?.status === "needs_review";
+  reviewWarningBannerEl.classList.toggle("hidden-panel", !isNeedsReview);
+
+  if (!isNeedsReview) {
+    return;
+  }
+
+  const flagSummary = Array.isArray(recording.qualityFlags) && recording.qualityFlags.length
+    ? recording.qualityFlags.map(formatQualityFlag).join(", ")
+    : "Gemini returned low-confidence transcript content.";
+  reviewWarningTextEl.textContent = `Transcript needs review: ${flagSummary}. Verify it against the source audio before relying on it.`;
+  reviewWarningRetryEl.disabled = !recording.canTranscribe || isStartingTranscription || isStoppingTranscription;
+  reviewWarningRetryEl.classList.toggle("disabled-button", reviewWarningRetryEl.disabled);
+  reviewWarningAcceptEl.disabled = !recording.canAcceptTranscript;
+  reviewWarningAcceptEl.classList.toggle("disabled-button", reviewWarningAcceptEl.disabled);
+};
+
+const syncShellState = () => {
+  if (!appPermissions?.screen?.granted) {
+    updateShellState("needs_screen_permission");
+    return;
+  }
+
+  if (selectedMicDeviceId && !appPermissions?.microphone?.granted) {
+    updateShellState("needs_mic_permission");
+    return;
+  }
+
+  updateShellState("setup");
+};
+
+const getSelectionReloadSignature = (recording) => {
+  if (!recording) {
+    return "";
+  }
+
+  return [
+    recording.id,
+    recording.status,
+    recording.statusDetail || "",
+    recording.transcriptPath || "",
+    recording.mediaPath || "",
+    recording.modifiedAt || "",
+    recording.sizeBytes || 0,
+    recording.lastError || "",
+    Array.isArray(recording.qualityFlags) ? recording.qualityFlags.join(",") : "",
+  ].join("|");
+};
+
+const shouldLoadSelectionDetails = ({ previousSelection, nextSelection, explicitLoadDetails } = {}) => {
+  if (typeof explicitLoadDetails === "boolean") {
+    return explicitLoadDetails;
+  }
+
+  if (!nextSelection || shouldBlockSelectionHeavyLoad(nextSelection)) {
+    return false;
+  }
+
+  return getSelectionReloadSignature(previousSelection) !== getSelectionReloadSignature(nextSelection);
 };
 
 const closeMp3ExportModal = (selection = null) => {
@@ -229,10 +583,25 @@ const askRetranscribeOverride = () => new Promise((resolve) => {
   retranscribeModalEl.classList.remove("hidden-panel");
 });
 
+const closeDeleteRecordingModal = (selection = false) => {
+  deleteRecordingModalEl.classList.add("hidden-panel");
+  if (pendingDeleteResolve) {
+    pendingDeleteResolve(selection);
+    pendingDeleteResolve = null;
+  }
+};
+
+const askDeleteRecordingConfirm = (recordingLabel) => new Promise((resolve) => {
+  pendingDeleteResolve = resolve;
+  deleteRecordingNameEl.textContent = recordingLabel || "this item";
+  deleteRecordingModalEl.classList.remove("hidden-panel");
+});
+
 const switchView = (view) => {
   const nextView = ["setup", "review", "prompt"].includes(view) ? view : "setup";
   if (nextView !== "prompt") {
     previousPrimaryView = nextView;
+    persistAppSessionState();
   }
   currentView = nextView;
   setupViewEl.classList.toggle("hidden", nextView !== "setup");
@@ -243,7 +612,7 @@ const switchView = (view) => {
 
 const selectNewRecordingState = () => {
   selectionRequestId += 1;
-  selectedRecordingId = "";
+  setSelectedRecordingId("");
   transcriptPath = null;
   selectedRecordingHasTranscript = false;
   reviewTitleEl.textContent = "Select a file";
@@ -265,6 +634,8 @@ const selectNewRecordingState = () => {
   refreshDefaultRecordingFilename({ force: true });
   startRecordingFilenameClock();
   syncRecordingFilenameFieldState();
+  syncDeleteButtonState();
+  updateReviewWarningState(null);
   renderLibrary();
 };
 
@@ -426,12 +797,59 @@ const formatUsd = (value) => {
 };
 
 const getSelectedRecording = () => recordings.find((recording) => recording.id === selectedRecordingId) || null;
-const getRecordingByPath = (recordingPath) => recordings.find((recording) => recording.path === recordingPath) || null;
+const getRecordingByPath = (recordingPath) => recordings.find((recording) => recording.path === recordingPath || recording.mediaPath === recordingPath) || null;
+const getRecordingById = (recordingId) => recordings.find((recording) => recording.id === recordingId) || null;
 const isLatestSelectionRequest = (requestId) => requestId === selectionRequestId;
 const normalizeRecordings = (items = []) => items.map((recording) => ({
   ...recording,
   id: recording.id || recording.path,
+  displayName: recording.displayName || recording.name || "",
+  name: recording.displayName || recording.name || "",
+  status: recording.status || "ready",
+  statusDetail: recording.statusDetail || "",
+  qualityFlags: Array.isArray(recording.qualityFlags) ? recording.qualityFlags : [],
+  lastTranscriptionModel: recording.lastTranscriptionModel || null,
+  lastTranscriptionCompletedAt: recording.lastTranscriptionCompletedAt || null,
+  isBusy: typeof recording.isBusy === "boolean" ? recording.isBusy : ["recording", "stopping", "finalizing", "importing", "transcribing"].includes(recording.status),
+  hasUsableMedia: typeof recording.hasUsableMedia === "boolean" ? recording.hasUsableMedia : Boolean(recording.sizeBytes),
+  canTranscribe: typeof recording.canTranscribe === "boolean" ? recording.canTranscribe : Boolean(recording.sizeBytes),
+  canExport: typeof recording.canExport === "boolean" ? recording.canExport : Boolean(recording.sizeBytes),
+  canOpen: typeof recording.canOpen === "boolean"
+    ? recording.canOpen
+    : (recording.status === "ready" || recording.status === "needs_review" || recording.status === "error" || recording.status === "transcribing"),
+  isSelectable: typeof recording.isSelectable === "boolean"
+    ? recording.isSelectable
+    : (recording.status === "ready" || recording.status === "needs_review" || recording.status === "error"),
+  canAcceptTranscript: recording.status === "needs_review",
 }));
+
+const getRecordingLabel = (recording) => recording?.displayName || recording?.name || "Meeting";
+
+const formatLibraryStatus = (status) => {
+  switch (status) {
+    case "recording":
+      return "Recording";
+    case "stopping":
+      return "Stopping";
+    case "finalizing":
+      return "Finalizing";
+    case "importing":
+      return "Importing";
+    case "transcribing":
+      return "Transcribing";
+    case "needs_review":
+      return "Needs review";
+    case "error":
+      return "Needs attention";
+    default:
+      return "Ready";
+  }
+};
+
+const getLibraryStatusText = (recording) => {
+  const baseStatus = formatLibraryStatus(recording?.status);
+  return recording?.statusDetail ? `${baseStatus} · ${recording.statusDetail}` : baseStatus;
+};
 
 const setTheme = (theme) => {
   const resolvedTheme = theme === "system" ? (SYSTEM_THEME_QUERY.matches ? "dark" : "light") : theme;
@@ -479,20 +897,20 @@ const refreshDisplayedAudioLevels = () => {
 
 const setSidebarRecordingActionState = ({ recording = false, pending = false } = {}) => {
   if (recording) {
-    sidebarNewRecordingEl.disabled = true;
-    sidebarRailNewRecordingEl.disabled = true;
+    sidebarNewRecordingEl.disabled = false;
+    sidebarRailNewRecordingEl.disabled = false;
     sidebarNewRecordingEl.style.backgroundColor = "#dc2626";
     sidebarNewRecordingEl.style.color = "white";
-    sidebarNewRecordingEl.innerHTML = `
-      <div class="w-3.5 h-3.5 rounded-sm bg-white"></div>
-      RECORDING IN PROGRESS
-    `;
+    sidebarNewRecordingEl.innerHTML = "RECORDING IN PROGRESS";
     sidebarRailNewRecordingEl.style.backgroundColor = "#dc2626";
     sidebarRailNewRecordingEl.style.borderColor = "#dc2626";
     sidebarRailNewRecordingEl.style.color = "white";
-    sidebarRailNewRecordingEl.innerHTML = '<div class="w-3.5 h-3.5 rounded-sm bg-white"></div>';
+    sidebarRailNewRecordingEl.innerHTML = '<i data-lucide="mic" class="w-4 h-4"></i>';
+    sidebarNewRecordingEl.title = "Return to recording";
+    sidebarRailNewRecordingEl.title = "Return to recording";
     sidebarNewRecordingEl.classList.toggle("opacity-60", pending);
     sidebarRailNewRecordingEl.classList.toggle("opacity-60", pending);
+    renderIcons();
     return;
   }
 
@@ -508,6 +926,8 @@ const setSidebarRecordingActionState = ({ recording = false, pending = false } =
   sidebarRailNewRecordingEl.style.borderColor = "#2563eb";
   sidebarRailNewRecordingEl.style.color = "white";
   sidebarRailNewRecordingEl.innerHTML = '<i data-lucide="plus" class="w-4 h-4"></i>';
+  sidebarNewRecordingEl.title = "New recording";
+  sidebarRailNewRecordingEl.title = "New recording";
   sidebarNewRecordingEl.classList.remove("opacity-60");
   sidebarRailNewRecordingEl.classList.remove("opacity-60");
   renderIcons();
@@ -557,16 +977,42 @@ const setRecordingButtonState = () => {
 };
 
 const setProcessButtonState = ({ isLoading = false } = {}) => {
-  processButtonEl.disabled = isLoading;
-  processButtonEl.classList.toggle("btn-processing-loading", isLoading);
-  processButtonEl.classList.toggle("disabled-button", isLoading);
+  const selected = getSelectedRecording();
+  const isTranscribing = selected?.status === "transcribing";
+  const isDisabled = !selected
+    || !selected.canOpen
+    || (isTranscribing ? isStoppingTranscription : (isLoading || isStartingTranscription || !selected.canTranscribe));
 
-  if (isLoading) {
+  processButtonEl.disabled = isDisabled;
+  processButtonEl.classList.toggle("btn-processing-loading", isLoading || isStartingTranscription || isStoppingTranscription);
+  processButtonEl.classList.toggle("disabled-button", isDisabled);
+
+  if (isTranscribing) {
+    processButtonTextEl.innerHTML = isStoppingTranscription
+      ? 'STOPPING <span class="loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>'
+      : 'STOP TRANSCRIBING';
+    return;
+  }
+
+  if (isLoading || isStartingTranscription) {
     processButtonTextEl.innerHTML = 'TRANSCRIBING <span class="loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
     return;
   }
 
   processButtonTextEl.textContent = selectedRecordingHasTranscript ? "RETRANSCRIBE" : "TRANSCRIBE";
+  updateReviewWarningState(selected);
+};
+
+const syncDeleteButtonState = () => {
+  const selected = getSelectedRecording();
+  const isActiveRecording = Boolean(selected && currentRecordingId === selected.id && (isRecording || isPendingStart || isPendingStop));
+  const isDisabled = !selected
+    || !selected.canOpen
+    || isActiveRecording
+    || BUSY_RECORDING_STATUSES.has(selected.status);
+
+  deleteRecordingEl.disabled = isDisabled;
+  deleteRecordingEl.classList.toggle("disabled-button", isDisabled);
 };
 
 const startElapsedTimer = (timestamp) => {
@@ -597,6 +1043,15 @@ const stopElapsedTimer = (timestamp) => {
   startTimeMs = null;
 };
 
+const freezeElapsedTimer = () => {
+  clearTimeout(updateTimer);
+  updateTimer = null;
+  if (startTimeMs !== null) {
+    const elapsedTime = Math.max(0, Math.floor((Date.now() - startTimeMs) / 1000));
+    timerDisplayEl.textContent = formatRecordingClock(elapsedTime);
+  }
+};
+
 const resetRecordingUiState = (timestamp) => {
   isRecording = false;
   isPendingStart = false;
@@ -608,6 +1063,7 @@ const resetRecordingUiState = (timestamp) => {
   microphoneSelectEl.disabled = false;
   startRecordingFilenameClock();
   refreshDisplayedAudioLevels();
+  syncDeleteButtonState();
 };
 
 const renderPreview = () => {
@@ -776,6 +1232,25 @@ const updateSearchStatus = () => {
   searchStatusEl.textContent = `${current}/${searchMatches.length} matches`;
 };
 
+const scrollEditorMatchIntoView = (match) => {
+  if (!match) {
+    return;
+  }
+
+  const textBeforeMatch = markdownEditorEl.value.slice(0, match.start);
+  const lineIndex = textBeforeMatch.split("\n").length - 1;
+  const columnIndex = textBeforeMatch.length - (textBeforeMatch.lastIndexOf("\n") + 1);
+  const computedStyle = window.getComputedStyle(markdownEditorEl);
+  const fontSize = parseFloat(computedStyle.fontSize) || 14;
+  const lineHeight = parseFloat(computedStyle.lineHeight) || (fontSize * 1.5);
+  const estimatedCharWidth = fontSize * 0.62;
+  const nextScrollTop = Math.max(0, (lineIndex * lineHeight) - ((markdownEditorEl.clientHeight - lineHeight) / 2));
+  const nextScrollLeft = Math.max(0, (columnIndex * estimatedCharWidth) - (markdownEditorEl.clientWidth / 3));
+
+  markdownEditorEl.scrollTop = nextScrollTop;
+  markdownEditorEl.scrollLeft = nextScrollLeft;
+};
+
 const selectMatchByIndex = (index, { focusEditor = true } = {}) => {
   if (!searchMatches.length) {
     activeSearchIndex = -1;
@@ -789,6 +1264,9 @@ const selectMatchByIndex = (index, { focusEditor = true } = {}) => {
     markdownEditorEl.focus();
   }
   markdownEditorEl.setSelectionRange(match.start, match.end);
+  requestAnimationFrame(() => {
+    scrollEditorMatchIntoView(match);
+  });
   updateSearchStatus();
 };
 
@@ -891,19 +1369,34 @@ const renderLibrary = () => {
   recordings.forEach((recording) => {
     const item = document.createElement("button");
     item.type = "button";
-    item.className = `sidebar-item w-full p-2 rounded-lg cursor-pointer flex flex-col text-left ${selectedRecordingId === recording.id ? "active" : ""}`;
+    const isPending = !recording.canOpen;
+    const isBusy = Boolean(recording.isBusy);
+    const isError = recording.status === "error";
+    const isNeedsReview = recording.status === "needs_review";
+    item.disabled = isPending;
+    item.className = `sidebar-item w-full p-2 rounded-lg flex flex-col text-left ${selectedRecordingId === recording.id ? "active" : ""} ${isBusy ? "pending" : ""} ${recording.canOpen ? "cursor-pointer" : ""} ${isError ? "error" : ""} ${isNeedsReview ? "error" : ""}`;
+    const statusIcon = isBusy
+      ? '<i data-lucide="loader-2" class="w-3 h-3 animate-spin-fast"></i>'
+      : (isNeedsReview
+        ? '<i data-lucide="shield-alert" class="w-3 h-3"></i>'
+        : (isError ? '<i data-lucide="triangle-alert" class="w-3 h-3"></i>' : ""));
     item.innerHTML = `
-      <span class="text-xs font-semibold truncate">${recording.name.replace(/\.[^/.]+$/u, "")}</span>
+      <span class="text-xs font-semibold truncate">${getRecordingLabel(recording)}</span>
       <span class="text-[9px]" style="color: var(--text-soft);">${new Date(recording.createdAt).toLocaleString()}</span>
+      <span class="text-[9px] flex items-center gap-1 mt-1" style="color: ${isError ? "#f87171" : (isNeedsReview ? "#fbbf24" : "var(--text-soft)")};">${statusIcon}<span>${getLibraryStatusText(recording)}</span></span>
     `;
-    item.addEventListener("click", async () => {
-      selectedRecordingId = recording.id;
-      renderLibrary();
-      const requestId = ++selectionRequestId;
-      await updateSelection({ switchToReview: true, requestId });
-    });
+    if (recording.canOpen) {
+      item.addEventListener("click", async () => {
+        setSelectedRecordingId(recording.id);
+        renderLibrary();
+        const requestId = ++selectionRequestId;
+        await updateSelection({ switchToReview: true, requestId });
+      });
+    }
     recordingsListEl.appendChild(item);
   });
+
+  renderIcons();
 };
 
 const updateSelectedModelDescription = () => {
@@ -929,15 +1422,25 @@ const updateEstimateDisplay = () => {
 
 const refreshRecordingAnalysis = async () => {
   const selected = getSelectedRecording();
-  if (!selected) {
+  if (!selected || !selected.hasUsableMedia) {
     recordingAnalysis = null;
     updateEstimateDisplay();
     return;
   }
 
   try {
+    if (shouldBlockSelectionHeavyLoad(selected)) {
+      recordingAnalysis = {
+        path: selected.path,
+        sizeBytes: selected.sizeBytes,
+        durationSeconds: selected.durationSeconds,
+        estimate: null,
+      };
+      updateEstimateDisplay();
+      return;
+    }
     recordingAnalysis = await ipcRenderer.invoke("get-recording-analysis", {
-      filePath: selected.path,
+      recordingId: selected.id,
       model: modelSelectEl.value,
     });
   } catch (error) {
@@ -1025,53 +1528,45 @@ const updateSelection = async ({ switchToReview = false, requestId = selectionRe
     recordingAnalysis = null;
     updateEstimateDisplay();
     setProcessButtonState({ isLoading: false });
+    syncDeleteButtonState();
+    updateReviewWarningState(null);
     if (!isRecording) {
       switchView("setup");
     }
     return;
   }
 
-  reviewTitleEl.textContent = selected.name.replace(/\.flac$/i, "");
+  persistAppSessionState();
+  reviewTitleEl.textContent = getRecordingLabel(selected);
   metaDateTimeEl.textContent = new Date(selected.createdAt).toLocaleString();
   metaSizeEl.textContent = formatSize(selected.sizeBytes);
-  exportMp3El.disabled = false;
-  exportMp3El.classList.remove("disabled-button");
+  const isBusySelection = BUSY_RECORDING_STATUSES.has(selected.status);
+  const isTranscribingSelection = selected.status === "transcribing";
+  const canExportNow = Boolean(selected.canExport && !isBusySelection);
+  exportMp3El.disabled = !canExportNow;
+  exportMp3El.classList.toggle("disabled-button", !canExportNow);
+  markdownEditorEl.readOnly = isTranscribingSelection;
+  updateReviewWarningState(selected);
+  setProcessButtonState({ isLoading: false });
+  syncDeleteButtonState();
 
   if (!loadDetails) {
-    resetPlayerSource();
-    setEditorContent("", { resetHistory: true });
-    transcriptPath = null;
-    selectedRecordingHasTranscript = false;
-    openTranscriptButtonEl.disabled = true;
-    openTranscriptButtonEl.classList.add("disabled-button");
-    saveBtnEl.disabled = true;
-    saveBtnEl.classList.add("disabled-button");
-    recordingAnalysis = null;
-    updateEstimateDisplay();
-    setProcessButtonState({ isLoading: false });
+    if (selected.statusDetail) {
+      setStatusMessage(selected.statusDetail);
+    }
+    if (switchToReview) {
+      switchView("review");
+    }
     return;
-  }
-
-  await refreshRecordingAnalysis();
-  if (!isLatestSelectionRequest(requestId)) return;
-
-  try {
-    resetPlayerSource();
-    setPlaybackControlsState({ enabled: false, loading: true });
-    const { playbackPath } = await ipcRenderer.invoke("get-playback-source", selected.path);
-    if (!isLatestSelectionRequest(requestId)) return;
-    recordingPlayerEl.src = pathToFileURL(playbackPath).href;
-    recordingPlayerEl.load();
-  } catch (error) {
-    if (!isLatestSelectionRequest(requestId)) return;
-    resetPlayerSource();
-    setStatusMessage(`Playback preparation failed: ${error.message}`);
   }
 
   transcriptPath = selected.transcriptPath || null;
   selectedRecordingHasTranscript = false;
   openTranscriptButtonEl.disabled = true;
   openTranscriptButtonEl.classList.add("disabled-button");
+  saveBtnEl.disabled = true;
+  saveBtnEl.classList.add("disabled-button");
+
   if (transcriptPath) {
     try {
       const result = await ipcRenderer.invoke("load-markdown", transcriptPath);
@@ -1080,43 +1575,140 @@ const updateSelection = async ({ switchToReview = false, requestId = selectionRe
       selectedRecordingHasTranscript = true;
       openTranscriptButtonEl.disabled = false;
       openTranscriptButtonEl.classList.remove("disabled-button");
-      saveBtnEl.disabled = false;
-      saveBtnEl.classList.remove("disabled-button");
-      setStatusMessage(`Loaded transcript: ${path.basename(transcriptPath)}`);
+      saveBtnEl.disabled = isTranscribingSelection;
+      saveBtnEl.classList.toggle("disabled-button", isTranscribingSelection);
     } catch {
       if (!isLatestSelectionRequest(requestId)) return;
       setEditorContent("", { resetHistory: true });
-      saveBtnEl.disabled = false;
-      saveBtnEl.classList.remove("disabled-button");
-      setStatusMessage("No transcript yet for selected recording.");
     }
+  } else if (!selected.canOpen || isBusySelection) {
+    setEditorContent("", { resetHistory: true });
   } else {
     setEditorContent("", { resetHistory: true });
-    saveBtnEl.disabled = false;
-    saveBtnEl.classList.remove("disabled-button");
-    setStatusMessage("No transcript yet for selected recording.");
   }
 
-  setProcessButtonState({ isLoading: false });
+  if (!isLatestSelectionRequest(requestId)) return;
+
+  if (!selected.canOpen && !isBusySelection) {
+    resetPlayerSource();
+    recordingAnalysis = null;
+    updateEstimateDisplay();
+    setStatusMessage(selected.lastError || "This item cannot be opened yet.");
+    if (switchToReview) {
+      switchView("review");
+    }
+    return;
+  }
+
+  if (selected.hasUsableMedia && !shouldBlockSelectionHeavyLoad(selected)) {
+    await refreshRecordingAnalysis();
+    if (!isLatestSelectionRequest(requestId)) return;
+
+    try {
+      resetPlayerSource();
+      setPlaybackControlsState({ enabled: false, loading: true });
+      const { playbackPath } = await ipcRenderer.invoke("get-playback-source", {
+        recordingId: selected.id,
+      });
+      if (!isLatestSelectionRequest(requestId)) return;
+      recordingPlayerEl.src = pathToFileURL(playbackPath).href;
+      recordingPlayerEl.load();
+    } catch (error) {
+      if (!isLatestSelectionRequest(requestId)) return;
+      resetPlayerSource();
+      setStatusMessage(`Playback preparation failed: ${error.message}`);
+    }
+  } else {
+    recordingAnalysis = null;
+    updateEstimateDisplay();
+    resetPlayerSource();
+  }
+
+  if (selected.status === "needs_review") {
+    setStatusMessage(selected.statusDetail || "Transcript needs review before you rely on it.");
+  } else if (isTranscribingSelection) {
+    setStatusMessage(selected.statusDetail || "Transcription in progress.");
+  } else if (selectedRecordingHasTranscript) {
+    setStatusMessage(`Loaded transcript for ${getRecordingLabel(selected)}`);
+  } else if (selected.lastError) {
+    setStatusMessage(selected.lastError);
+  } else if (selected.statusDetail) {
+    setStatusMessage(selected.statusDetail);
+  } else {
+    setStatusMessage("No transcript yet for selected recording.");
+  }
 
   if (switchToReview) {
     switchView("review");
   }
 };
 
-const refreshRecordings = async ({ switchToReview = false, autoSelectFirst = true, loadDetails = true } = {}) => {
-  try {
-    recordings = normalizeRecordings(await ipcRenderer.invoke("list-recordings"));
-    if (!recordings.some((recording) => recording.id === selectedRecordingId)) {
-      selectedRecordingId = autoSelectFirst ? (recordings[0]?.id || "") : "";
-    }
-    renderLibrary();
-    const requestId = ++selectionRequestId;
-    await updateSelection({ switchToReview, requestId, loadDetails });
-  } catch (error) {
-    setStatusMessage(`Failed to load recordings: ${error.message}`);
+const applyRecordingsSnapshot = async (
+  items = [],
+  {
+    switchToReview = false,
+    autoSelectFirst = true,
+    loadDetails,
+    preferredRecordingId = "",
+  } = {}
+) => {
+  const previousSelection = getSelectedRecording();
+  recordings = normalizeRecordings(items);
+
+  if (!recordings.some((recording) => recording.id === selectedRecordingId)) {
+    const preferredRecording = getRecordingById(preferredRecordingId)
+      || (currentRecordingId ? getRecordingById(currentRecordingId) : null);
+    setSelectedRecordingId(preferredRecording?.id || (autoSelectFirst ? (recordings[0]?.id || "") : ""), {
+      persist: false,
+    });
   }
+
+  renderLibrary();
+
+  const nextSelection = getSelectedRecording();
+  const shouldLoadDetailsNow = shouldLoadSelectionDetails({
+    previousSelection,
+    nextSelection,
+    explicitLoadDetails: loadDetails,
+  });
+
+  const requestId = ++selectionRequestId;
+  await updateSelection({
+    switchToReview,
+    requestId,
+    loadDetails: shouldLoadDetailsNow,
+  });
 };
+
+const refreshRecordings = ({ switchToReview = false, autoSelectFirst = true, loadDetails, preferredRecordingId = "" } = {}) => {
+  refreshRecordingsPromise = refreshRecordingsPromise
+    .catch(() => {})
+    .then(async () => {
+      const items = await ipcRenderer.invoke("list-recordings");
+      await applyRecordingsSnapshot(items, {
+        switchToReview,
+        autoSelectFirst,
+        loadDetails,
+        preferredRecordingId,
+      });
+    })
+    .catch((error) => {
+      setStatusMessage(`Failed to load recordings: ${error.message}`);
+    });
+
+  return refreshRecordingsPromise;
+};
+
+const scheduleRefreshRecordings = (options = {}) => new Promise((resolve) => {
+  if (refreshRecordingsTimer) {
+    clearTimeout(refreshRecordingsTimer);
+  }
+
+  refreshRecordingsTimer = window.setTimeout(() => {
+    refreshRecordingsTimer = null;
+    refreshRecordings(options).finally(resolve);
+  }, 120);
+});
 
 const requestRendererMicrophoneAccess = async () => {
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -1248,6 +1840,7 @@ const loadAvailableMicrophonesIfGranted = async () => {
 const loadTranscriptionModels = async () => {
   const result = await ipcRenderer.invoke("get-transcription-models");
   modelCatalog = Array.isArray(result?.models) ? result.models : [];
+  defaultTranscriptionModelId = result?.defaultModelId || modelCatalog[0]?.id || "";
   modelSelectEl.innerHTML = "";
 
   modelCatalog.forEach((model) => {
@@ -1257,8 +1850,8 @@ const loadTranscriptionModels = async () => {
     modelSelectEl.appendChild(option);
   });
 
-  if (modelCatalog.some((model) => model.id === "gemini-2.5-flash")) {
-    modelSelectEl.value = "gemini-2.5-flash";
+  if (defaultTranscriptionModelId && modelCatalog.some((model) => model.id === defaultTranscriptionModelId)) {
+    modelSelectEl.value = defaultTranscriptionModelId;
   } else if (modelCatalog[0]) {
     modelSelectEl.value = modelCatalog[0].id;
   }
@@ -1268,11 +1861,16 @@ const loadTranscriptionModels = async () => {
 
 const applyRecordingStateSnapshot = (state) => {
   if (!state?.isRecording) {
+    currentRecordingId = "";
     resetRecordingUiState(Date.now());
     return;
   }
 
   stopRecordingFilenameClock();
+  currentRecordingId = state.recordingId || currentRecordingId;
+  if (currentRecordingId) {
+    setSelectedRecordingId(currentRecordingId, { persist: false });
+  }
   isRecording = true;
   isPendingStart = false;
   isPendingStop = false;
@@ -1284,6 +1882,7 @@ const applyRecordingStateSnapshot = (state) => {
   startElapsedTimer(state.startedAtMs);
   microphoneSelectEl.disabled = true;
   outputFilePathEl.textContent = state.recordingPath || "Recording in progress";
+  syncDeleteButtonState();
   switchView("setup");
 };
 
@@ -1393,6 +1992,8 @@ saveTranscriptionPromptEl.addEventListener("click", async () => {
 checkPermissionsEl.addEventListener("click", async () => {
   try {
     const result = await ipcRenderer.invoke("check-permissions");
+    applyPermissionSummary(result?.permissions);
+    syncShellState();
     setStatusMessage(result?.ok ? "Permissions check complete." : "Permissions check failed.");
   } catch (error) {
     setStatusMessage(`Permissions check failed: ${error.message}`);
@@ -1403,10 +2004,12 @@ requestMicPermissionEl.addEventListener("click", async () => {
   try {
     await requestRendererMicrophoneAccess();
     const result = await ipcRenderer.invoke("request-microphone-permission");
+    applyPermissionSummary(result?.permissions);
     setStatusMessage(result?.message || "Microphone permission updated.");
     if (result?.ok) {
       await refreshMicrophones();
     }
+    syncShellState();
   } catch (error) {
     setStatusMessage(`Microphone permission request failed: ${error.message}`);
   }
@@ -1431,10 +2034,22 @@ openTranscriptFolderEl.addEventListener("click", async () => {
 });
 
 sidebarNewRecordingEl.addEventListener("click", () => {
+  if (isRecording || isPendingStop) {
+    switchView("setup");
+    setStatusMessage("Recording in progress.");
+    return;
+  }
+
   selectNewRecordingState();
   switchView("setup");
 });
 sidebarRailNewRecordingEl.addEventListener("click", () => {
+  if (isRecording || isPendingStop) {
+    switchView("setup");
+    setStatusMessage("Recording in progress.");
+    return;
+  }
+
   selectNewRecordingState();
   switchView("setup");
 });
@@ -1445,7 +2060,82 @@ openTranscriptionPromptEl.addEventListener("click", () => {
 closePromptViewEl.addEventListener("click", () => {
   switchView(selectedRecordingId && previousPrimaryView !== "setup" ? previousPrimaryView : (selectedRecordingId ? "review" : "setup"));
 });
-refreshRecordingsEl.addEventListener("click", refreshRecordings);
+const importMediaIntoLibrary = async () => {
+  try {
+    setStatusMessage("Importing media...");
+    const result = await ipcRenderer.invoke("import-media");
+    const imported = Array.isArray(result?.imported) ? result.imported : [];
+    const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
+    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
+    if (imported[0]?.id) {
+      setSelectedRecordingId(imported[0].id);
+      renderLibrary();
+      const requestId = ++selectionRequestId;
+      await updateSelection({ switchToReview: imported[0].isSelectable, requestId });
+    }
+    if (imported.length && rejected.length) {
+      setStatusMessage(`Imported ${imported.length} item${imported.length === 1 ? "" : "s"}; skipped ${rejected.length} unsupported file${rejected.length === 1 ? "" : "s"}.`);
+      return;
+    }
+    if (imported.length) {
+      setStatusMessage(`Imported ${imported.length} item${imported.length === 1 ? "" : "s"}.`);
+      return;
+    }
+    if (rejected.length) {
+      setStatusMessage(`Skipped ${rejected.length} unsupported file${rejected.length === 1 ? "" : "s"}.`);
+      return;
+    }
+    setStatusMessage("Import canceled.");
+  } catch (error) {
+    setStatusMessage(`Import failed: ${error.message}`);
+  }
+};
+
+importRecordingsEl.addEventListener("click", () => {
+  importMediaIntoLibrary();
+});
+sidebarRailImportRecordingsEl.addEventListener("click", () => {
+  importMediaIntoLibrary();
+});
+refreshRecordingsEl.addEventListener("click", () => {
+  refreshRecordings({ loadDetails: true });
+});
+appStatePrimaryEl.addEventListener("click", async () => {
+  try {
+    if (appShellState === "needs_screen_permission") {
+      const result = await ipcRenderer.invoke("check-permissions");
+      applyPermissionSummary(result?.permissions);
+      syncShellState();
+      setStatusMessage(result?.ok ? "Permissions check complete." : "Screen permission is still missing.");
+      return;
+    }
+
+    if (appShellState === "needs_mic_permission") {
+      await requestRendererMicrophoneAccess();
+      const result = await ipcRenderer.invoke("request-microphone-permission");
+      applyPermissionSummary(result?.permissions);
+      if (result?.ok) {
+        await refreshMicrophones();
+      }
+      syncShellState();
+      setStatusMessage(result?.message || "Microphone permission updated.");
+    }
+  } catch (error) {
+    setStatusMessage(error.message);
+  }
+});
+appStateSecondaryEl.addEventListener("click", async () => {
+  if (appShellState !== "needs_mic_permission") {
+    return;
+  }
+
+  selectedMicDeviceId = "";
+  selectedRendererMicDeviceId = "";
+  microphoneSelectEl.value = "";
+  await stopLiveMicMonitor();
+  syncShellState();
+  setStatusMessage("Continuing without microphone input.");
+});
 collapseSidebarEl.addEventListener("click", collapseSidebar);
 restoreSidebarEl.addEventListener("click", restoreSidebar);
 sidebarRailSettingsEl.addEventListener("click", async () => {
@@ -1521,7 +2211,9 @@ recordButtonEl.addEventListener("click", () => {
   }
 
   isPendingStop = true;
+  freezeElapsedTimer();
   setRecordingButtonState();
+  setStatusMessage("Stopping recording...");
   ipcRenderer.send("stop-recording");
 });
 
@@ -1590,11 +2282,13 @@ recordingPlayerEl.addEventListener("error", () => {
 
 titleEditButtonEl.addEventListener("click", () => {
   const isEditing = reviewTitleEl.getAttribute("contenteditable") === "true";
-  reviewTitleEl.setAttribute("contenteditable", isEditing ? "false" : "true");
-  reviewTitleEl.classList.toggle("title-edit-active", !isEditing);
-  titleEditIconEl.setAttribute("data-lucide", isEditing ? "pen" : "check");
+  const nextIsEditing = !isEditing;
+  reviewTitleEl.setAttribute("contenteditable", nextIsEditing ? "true" : "false");
+  reviewTitleEl.classList.toggle("title-edit-active", nextIsEditing);
+  titleEditIconEl.setAttribute("data-lucide", nextIsEditing ? "check" : "pen");
+  titleEditButtonEl.title = nextIsEditing ? "Save title" : "Edit title";
   renderIcons();
-  if (!isEditing) {
+  if (nextIsEditing) {
     previousReviewTitle = reviewTitleEl.textContent.trim();
     updateReviewTitleEditState();
     reviewTitleEl.focus();
@@ -1609,18 +2303,31 @@ reviewTitleEl.addEventListener("blur", () => {
   reviewTitleEl.classList.remove("title-edit-active");
   delete reviewTitleEl.dataset.empty;
   titleEditIconEl.setAttribute("data-lucide", "pen");
+  titleEditButtonEl.title = "Edit title";
   renderIcons();
 
   const selected = getSelectedRecording();
   if (!selected) return;
   const nextTitle = reviewTitleEl.textContent.trim();
   if (!nextTitle) {
-    reviewTitleEl.textContent = previousReviewTitle || selected.name.replace(/\.flac$/i, "");
+    reviewTitleEl.textContent = previousReviewTitle || getRecordingLabel(selected);
     return;
   }
-  selected.name = selected.name.toLowerCase().endsWith(".flac") ? `${nextTitle}.flac` : nextTitle;
-  previousReviewTitle = nextTitle;
-  renderLibrary();
+  const normalizedTitle = nextTitle.replace(/\s+/gu, " ").trim();
+  reviewTitleEl.textContent = normalizedTitle;
+  ipcRenderer.invoke("rename-recording", {
+    recordingId: selected.id,
+    displayName: normalizedTitle,
+  }).then((updated) => {
+    selected.displayName = updated?.displayName || normalizedTitle;
+    selected.name = selected.displayName;
+    previousReviewTitle = selected.displayName;
+    renderLibrary();
+    setStatusMessage(`Renamed to ${selected.displayName}`);
+  }).catch((error) => {
+    reviewTitleEl.textContent = previousReviewTitle || getRecordingLabel(selected);
+    setStatusMessage(`Rename failed: ${error.message}`);
+  });
 });
 
 reviewTitleEl.addEventListener("input", () => {
@@ -1645,6 +2352,40 @@ openTranscriptButtonEl.addEventListener("click", async () => {
   }
 });
 
+reviewWarningRetryEl.addEventListener("click", () => {
+  if (reviewWarningRetryEl.disabled) {
+    return;
+  }
+  processButtonEl.click();
+});
+
+reviewWarningAcceptEl.addEventListener("click", async () => {
+  const selected = getSelectedRecording();
+  if (!selected || !selected.canAcceptTranscript) {
+    return;
+  }
+
+  reviewWarningAcceptEl.disabled = true;
+  reviewWarningAcceptEl.classList.add("disabled-button");
+  try {
+    await ipcRenderer.invoke("accept-transcript", {
+      recordingId: selected.id,
+    });
+    selected.status = "ready";
+    selected.statusDetail = null;
+    selected.qualityFlags = [];
+    selected.canAcceptTranscript = false;
+    renderLibrary();
+    updateReviewWarningState(selected);
+    setStatusMessage("Transcript accepted.");
+    await refreshRecordings({ autoSelectFirst: false });
+  } catch (error) {
+    setStatusMessage(`Could not accept transcript: ${error.message}`);
+  } finally {
+    updateReviewWarningState(selected);
+  }
+});
+
 modelSelectEl.addEventListener("change", async () => {
   updateSelectedModelDescription();
   await refreshRecordingAnalysis();
@@ -1657,6 +2398,32 @@ processButtonEl.addEventListener("click", async () => {
     return;
   }
 
+  if (selected.status === "transcribing") {
+    if (isStoppingTranscription) {
+      return;
+    }
+
+    isStoppingTranscription = true;
+    setProcessButtonState({ isLoading: false });
+    try {
+      await ipcRenderer.invoke("cancel-transcription", {
+        recordingId: selected.id,
+      });
+      setStatusMessage("Stopping transcription...");
+    } catch (error) {
+      setStatusMessage(`Could not stop transcription: ${error.message}`);
+    } finally {
+      isStoppingTranscription = false;
+      setProcessButtonState({ isLoading: false });
+    }
+    return;
+  }
+
+  if (!selected.canTranscribe) {
+    setStatusMessage("This recording cannot be transcribed because its media file is unavailable.");
+    return;
+  }
+
   if (selectedRecordingHasTranscript) {
     const shouldOverride = await askRetranscribeOverride();
     if (!shouldOverride) {
@@ -1664,25 +2431,45 @@ processButtonEl.addEventListener("click", async () => {
     }
   }
 
+  isStartingTranscription = true;
   setProcessButtonState({ isLoading: true });
-  try {
-    const result = await ipcRenderer.invoke("process-recording", {
-      filePath: selected.path,
-      model: modelSelectEl.value,
-      transcriptPath: selected.transcriptPath,
-    });
+  const transcriptionRequest = ipcRenderer.invoke("process-recording", {
+    recordingId: selected.id,
+    model: modelSelectEl.value,
+  });
+
+  transcriptionRequest.then((result) => {
+    if (result?.canceled) {
+      setStatusMessage("Transcription stopped.");
+      refreshRecordings({ autoSelectFirst: false, loadDetails: false });
+      return;
+    }
     transcriptPath = result.transcriptPath;
     selectedRecordingHasTranscript = true;
     selected.transcriptPath = result.transcriptPath;
+    selected.status = result.status || "ready";
+    selected.statusDetail = result.status === "needs_review"
+      ? "Gemini returned low-confidence transcript content. Review before relying on it."
+      : null;
+    selected.qualityFlags = Array.isArray(result.qualityFlags) ? result.qualityFlags : [];
+    selected.canAcceptTranscript = selected.status === "needs_review";
     setEditorContent(result.markdown, { resetHistory: true });
     saveBtnEl.disabled = false;
     saveBtnEl.classList.remove("disabled-button");
-    setStatusMessage(`Transcript ready: ${path.basename(transcriptPath)}`);
-  } catch (error) {
+    updateReviewWarningState(selected);
+    renderLibrary();
+    setStatusMessage(
+      result.status === "needs_review"
+        ? `Transcript saved with warnings: ${getRecordingLabel(selected)}`
+        : `Transcript ready: ${getRecordingLabel(selected)}`
+    );
+  }).catch((error) => {
     setStatusMessage(`Processing failed: ${error.message}`);
-  } finally {
+  }).finally(() => {
+    isStartingTranscription = false;
+    isStoppingTranscription = false;
     setProcessButtonState({ isLoading: false });
-  }
+  });
 });
 
 collapseEditorEl.addEventListener("click", () => collapsePane("editor"));
@@ -1756,8 +2543,8 @@ saveBtnEl.addEventListener("click", async () => {
   const editorSelection = captureTextSelection(markdownEditorEl);
   try {
     const result = await ipcRenderer.invoke("save-markdown", {
+      recordingId: selected.id,
       markdownPath: transcriptPath,
-      filePath: selected.path,
       content: markdownEditorEl.value,
     });
     if (result?.transcriptPath) {
@@ -1775,7 +2562,7 @@ saveBtnEl.addEventListener("click", async () => {
       saveBtnIconEl.classList.add("hidden");
       renderIcons();
     }, 1500);
-    setStatusMessage(`Saved ${path.basename(result?.transcriptPath || transcriptPath)}`);
+    setStatusMessage(`Saved transcript for ${getRecordingLabel(selected)}`);
   } catch (error) {
     setStatusMessage(`Save failed: ${error.message}`);
   } finally {
@@ -1796,10 +2583,54 @@ copyMarkdownEl.addEventListener("click", () => {
   setStatusMessage("Markdown copied.");
 });
 
+deleteRecordingEl.addEventListener("click", async () => {
+  const selected = getSelectedRecording();
+  if (!selected) {
+    setStatusMessage("Select a recording first.");
+    return;
+  }
+
+  const recordingLabel = getRecordingLabel(selected);
+  const shouldDelete = await askDeleteRecordingConfirm(recordingLabel);
+  if (!shouldDelete) {
+    return;
+  }
+
+  deleteRecordingEl.disabled = true;
+  try {
+    await ipcRenderer.invoke("delete-recording", {
+      recordingId: selected.id,
+    });
+    if (selectedRecordingId === selected.id) {
+      setSelectedRecordingId("");
+    }
+    if (currentRecordingId === selected.id && !isRecording && !isPendingStart && !isPendingStop) {
+      currentRecordingId = "";
+    }
+    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
+    await updateSelection({ switchToReview: false });
+    switchView("setup");
+    setStatusMessage(`Deleted ${recordingLabel}.`);
+  } catch (error) {
+    setStatusMessage(`Delete failed: ${error.message}`);
+  } finally {
+    syncDeleteButtonState();
+  }
+});
+
 exportMp3El.addEventListener("click", async () => {
   const selected = getSelectedRecording();
   if (!selected) {
     setStatusMessage("Select a recording first.");
+    return;
+  }
+
+  if (!selected.canExport || BUSY_RECORDING_STATUSES.has(selected.status)) {
+    setStatusMessage(
+      BUSY_RECORDING_STATUSES.has(selected.status)
+        ? "Export is unavailable while this item is still being processed."
+        : "This recording cannot be exported because its media file is unavailable."
+    );
     return;
   }
 
@@ -1811,7 +2642,7 @@ exportMp3El.addEventListener("click", async () => {
   exportMp3El.disabled = true;
   try {
     const result = await ipcRenderer.invoke("export-recording-mp3", {
-      filePath: selected.path,
+      recordingId: selected.id,
       chunked: exportMode === "chunked",
     });
 
@@ -1825,7 +2656,8 @@ exportMp3El.addEventListener("click", async () => {
   } catch (error) {
     setStatusMessage(`MP3 export failed: ${error.message}`);
   } finally {
-    exportMp3El.disabled = false;
+    exportMp3El.disabled = !selected.canExport;
+    exportMp3El.classList.toggle("disabled-button", !selected.canExport);
   }
 });
 
@@ -1843,6 +2675,30 @@ retranscribeModalEl.addEventListener("click", (event) => {
   if (event.target === retranscribeModalEl) {
     closeRetranscribeModal(false);
   }
+});
+deleteRecordingConfirmEl.addEventListener("click", () => closeDeleteRecordingModal(true));
+deleteRecordingCancelEl.addEventListener("click", () => closeDeleteRecordingModal(false));
+deleteRecordingModalEl.addEventListener("click", (event) => {
+  if (event.target === deleteRecordingModalEl) {
+    closeDeleteRecordingModal(false);
+  }
+});
+toggleDebugConsoleEl.addEventListener("click", () => {
+  setDebugConsoleOpen(!debugConsoleOpen);
+});
+closeDebugConsoleEl.addEventListener("click", () => {
+  setDebugConsoleOpen(false);
+});
+clearDebugConsoleEl.addEventListener("click", () => {
+  debugConsoleEntries = [];
+  renderDebugConsole();
+});
+copyDebugConsoleEl.addEventListener("click", () => {
+  const text = debugConsoleEntries
+    .map((entry) => `[${entry.timestamp}] [${entry.scope}] ${entry.extra ? `${entry.message} ${entry.extra}` : entry.message}`.trim())
+    .join("\n");
+  clipboard.writeText(text);
+  setStatusMessage("Debug console copied.");
 });
 
 resizerEl.addEventListener("mousedown", () => {
@@ -1881,6 +2737,11 @@ sidebarResizerEl.addEventListener("mousedown", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "d") {
+    event.preventDefault();
+    setDebugConsoleOpen(!debugConsoleOpen);
+    return;
+  }
   if (!event.metaKey) return;
   const key = event.key.toLowerCase();
   if (currentView === "prompt") {
@@ -1918,11 +2779,18 @@ window.addEventListener("keydown", (event) => {
 
 ipcRenderer.on("recording-status", async (_, status, timestamp, filepath, details) => {
   if (status === "START_RECORDING") {
-    selectNewRecordingState();
+    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
+    const matchingRecording = filepath ? getRecordingByPath(filepath) : null;
+    currentRecordingId = matchingRecording?.id || currentRecordingId;
+    if (matchingRecording) {
+      setSelectedRecordingId(matchingRecording.id);
+      renderLibrary();
+    }
     stopRecordingFilenameClock();
     isRecording = true;
     isPendingStart = false;
     isPendingStop = false;
+    isEditingRecordingTitle = false;
     setRecordingButtonState();
     startElapsedTimer(timestamp);
     microphoneSelectEl.disabled = true;
@@ -1932,17 +2800,37 @@ ipcRenderer.on("recording-status", async (_, status, timestamp, filepath, detail
     return;
   }
 
+  if (status === "STOPPING_RECORDING") {
+    isPendingStop = true;
+    freezeElapsedTimer();
+    setRecordingButtonState();
+    setStatusMessage("Finalizing recording...");
+    switchView("setup");
+    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
+    if (filepath) {
+      const matchingRecording = getRecordingByPath(filepath);
+      if (matchingRecording) {
+        currentRecordingId = matchingRecording.id;
+        setSelectedRecordingId(matchingRecording.id);
+        renderLibrary();
+      }
+    }
+    return;
+  }
+
   if (status === "STOP_RECORDING") {
     resetRecordingUiState(timestamp);
+    currentRecordingId = "";
     if (filepath) {
       outputFilePathEl.textContent = filepath;
-      selectedRecordingId = "";
+      setSelectedRecordingId("");
     }
     await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
     if (filepath) {
       const matchingRecording = getRecordingByPath(filepath);
       if (matchingRecording) {
-        selectedRecordingId = matchingRecording.id;
+        currentRecordingId = matchingRecording.id;
+        setSelectedRecordingId(matchingRecording.id);
       }
     }
     await updateSelection({ switchToReview: true });
@@ -1952,15 +2840,17 @@ ipcRenderer.on("recording-status", async (_, status, timestamp, filepath, detail
 
   if (status === "RECORDING_STOPPED_UNEXPECTEDLY") {
     resetRecordingUiState(timestamp);
+    currentRecordingId = "";
     if (filepath) {
       outputFilePathEl.textContent = filepath;
-      selectedRecordingId = "";
+      setSelectedRecordingId("");
     }
-    await refreshRecordings();
+    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
     if (filepath) {
       const matchingRecording = getRecordingByPath(filepath);
       if (matchingRecording) {
-        selectedRecordingId = matchingRecording.id;
+        currentRecordingId = matchingRecording.id;
+        setSelectedRecordingId(matchingRecording.id);
       }
     }
     await updateSelection({ switchToReview: true });
@@ -1969,9 +2859,14 @@ ipcRenderer.on("recording-status", async (_, status, timestamp, filepath, detail
   }
 
   if (status === "START_FAILED") {
+    currentRecordingId = "";
     resetRecordingUiState(timestamp);
     setStatusMessage(details ? `Failed to start recording: ${details}` : "Failed to start recording. Check permissions and try again.");
   }
+});
+
+ipcRenderer.on("internal-log-entry", (_, entry) => {
+  appendDebugEntry(entry);
 });
 
 ipcRenderer.on("recording-levels", (_, levels) => {
@@ -1980,16 +2875,66 @@ ipcRenderer.on("recording-levels", (_, levels) => {
   refreshDisplayedAudioLevels();
 });
 
+ipcRenderer.on("library-updated", async () => {
+  await scheduleRefreshRecordings({ autoSelectFirst: false });
+});
+
+const resolveBootstrapSelectionId = ({ recordings: nextRecordings = [], recordingState, taskState, sessionState }) => {
+  if (recordingState?.recordingId && nextRecordings.some((recording) => recording.id === recordingState.recordingId)) {
+    return recordingState.recordingId;
+  }
+
+  const busyRecordingId = (taskState?.busyRecordingIds || []).find((recordingId) => nextRecordings.some((recording) => recording.id === recordingId));
+  if (busyRecordingId) {
+    return busyRecordingId;
+  }
+
+  if (sessionState?.selectedRecordingId && nextRecordings.some((recording) => recording.id === sessionState.selectedRecordingId)) {
+    return sessionState.selectedRecordingId;
+  }
+
+  return "";
+};
+
+const resolveBootstrapView = ({ recordingState, selectedRecording, sessionState }) => {
+  if (recordingState?.isRecording) {
+    return "setup";
+  }
+
+  if (!selectedRecording) {
+    return "setup";
+  }
+
+  if (BUSY_RECORDING_STATUSES.has(selectedRecording.status) || selectedRecording.status === "needs_review") {
+    return "review";
+  }
+
+  return sessionState?.lastPrimaryView === "setup"
+    ? "review"
+    : (sessionState?.lastPrimaryView || "review");
+};
+
 const init = async () => {
   try {
+    installDebugConsoleHooks();
     renderIcons();
+    await loadDebugConsoleHistory();
+    appendDebugEntry({
+      scope: "debug-console",
+      message: "Debug console initialized.",
+    });
+    updateShellState("booting");
 
-    const [storagePaths, geminiSettings, recordingState, uiState] = await Promise.all([
-      ipcRenderer.invoke("get-storage-paths"),
-      ipcRenderer.invoke("get-gemini-settings"),
-      ipcRenderer.invoke("get-recording-state"),
-      ipcRenderer.invoke("get-ui-state"),
-    ]);
+    const bootstrap = await ipcRenderer.invoke("get-app-bootstrap-state");
+    const {
+      storagePaths,
+      geminiSettings,
+      recordingState,
+      uiState,
+      taskState,
+      permissions,
+      recordings: bootstrapRecordings,
+    } = bootstrap;
 
     selectedFolderPath = storagePaths.recordingsPath;
     transcriptsFolderPath = storagePaths.transcriptsPath;
@@ -1997,6 +2942,8 @@ const init = async () => {
     selectedTranscriptsPathEl.textContent = transcriptsFolderPath;
     openTranscriptFolderEl.disabled = false;
 
+    bootstrapSessionState = uiState?.sessionState || bootstrapSessionState;
+    applyPermissionSummary(permissions);
     setGeminiApiKeyStatus(geminiSettings);
     setPromptContent(geminiSettings?.transcriptionPrompt || "", { resetHistory: true });
 
@@ -2010,16 +2957,48 @@ const init = async () => {
     startRecordingFilenameClock();
     syncRecordingFilenameFieldState();
 
+    if ((taskState?.busyRecordingIds || []).length) {
+      updateShellState("recovering");
+    }
+
     await loadTranscriptionModels();
-    await refreshRecordings({ autoSelectFirst: false, loadDetails: false });
     await loadAvailableMicrophonesIfGranted();
+
+    const normalizedBootstrapRecordings = normalizeRecordings(bootstrapRecordings);
+    const preferredRecordingId = resolveBootstrapSelectionId({
+      recordings: normalizedBootstrapRecordings,
+      recordingState,
+      taskState,
+      sessionState: bootstrapSessionState,
+    });
+
+    if (preferredRecordingId) {
+      setSelectedRecordingId(preferredRecordingId, { persist: false });
+    }
+
+    await applyRecordingsSnapshot(normalizedBootstrapRecordings, {
+      autoSelectFirst: false,
+      loadDetails: Boolean(preferredRecordingId),
+      preferredRecordingId,
+    });
+
     applyRecordingStateSnapshot(recordingState);
+
+    const selectedRecording = getSelectedRecording();
+    switchView(resolveBootstrapView({
+      recordingState,
+      selectedRecording,
+      sessionState: bootstrapSessionState,
+    }));
+    syncShellState();
+
     renderPreview();
     updateSearchMatches({ focusEditor: false });
     updatePlayerUi();
     updateHistoryButtons();
     updatePromptHistoryButtons();
     updateEditorHeaderLayout();
+    updateReviewWarningState(selectedRecording);
 
     if (window.ResizeObserver && editorPaneEl && editorHeaderLayoutEl) {
       editorHeaderResizeObserver = new ResizeObserver(() => {
@@ -2028,9 +3007,13 @@ const init = async () => {
       editorHeaderResizeObserver.observe(editorPaneEl);
       editorHeaderResizeObserver.observe(editorHeaderLayoutEl);
     }
-
-    switchView("setup");
   } catch (error) {
+    appendDebugEntry({
+      scope: "init",
+      message: error.message || String(error),
+      level: "error",
+    });
+    updateShellState("setup");
     setStatusMessage(`Initialization failed: ${error.message}`);
   }
 };

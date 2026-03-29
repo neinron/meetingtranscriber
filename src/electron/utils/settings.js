@@ -3,8 +3,16 @@ const path = require("node:path");
 const { app } = require("electron");
 
 const SETTINGS_FILE_NAME = "settings.json";
+const DEFAULT_APP_SESSION_STATE = {
+  selectedRecordingId: "",
+  lastPrimaryView: "setup",
+};
 const DEFAULT_TRANSCRIPTION_PROMPT = [
-  "You are a precise meeting transcription assistant.",
+  "You are a literal audio transcription system.",
+  "Transcribe only speech that is actually audible in the provided audio.",
+  "Do not infer, summarize, paraphrase, complete, or invent content that is not clearly present.",
+  "If speech is unclear, missing, overlapped, or inaudible, mark that portion as [inaudible] instead of guessing.",
+  "If there is no intelligible speech for a stretch, do not fabricate dialogue for that section.",
   "Produce a diarized transcript as plain text lines.",
   "Requirements:",
   "1. Output transcript lines only. No headings.",
@@ -16,6 +24,9 @@ const DEFAULT_TRANSCRIPTION_PROMPT = [
   "7. Create a new transcript entry only when the speaker changes.",
   "8. Do not split one speaker into many short entries because of brief pauses.",
   "9. Keep long monologues as a single entry until another speaker starts.",
+  "10. Do not write plausible-sounding meeting content unless it is directly supported by the audio.",
+  "11. Preserve hesitations, partial phrases, and imperfect grammar when they are audible.",
+  "12. If only one speaker is audible, keep a single stable speaker label instead of inventing others.",
 ].join("\n");
 
 const getSettingsPath = () => path.join(app.getPath("userData"), SETTINGS_FILE_NAME);
@@ -121,6 +132,21 @@ const getUiDisclosureState = () => {
   return settings?.uiDisclosureState && typeof settings.uiDisclosureState === "object" ? settings.uiDisclosureState : {};
 };
 
+const getAppSessionState = () => {
+  const settings = readSettings();
+  const sessionState = settings?.appSessionState;
+  if (!sessionState || typeof sessionState !== "object") {
+    return { ...DEFAULT_APP_SESSION_STATE };
+  }
+
+  return {
+    selectedRecordingId: typeof sessionState.selectedRecordingId === "string" ? sessionState.selectedRecordingId : "",
+    lastPrimaryView: ["setup", "review", "prompt"].includes(sessionState.lastPrimaryView)
+      ? sessionState.lastPrimaryView
+      : "setup",
+  };
+};
+
 const saveUiDisclosureState = (disclosureState) => {
   updateSettings((settings) => ({
     ...settings,
@@ -131,6 +157,18 @@ const saveUiDisclosureState = (disclosureState) => {
   }));
 
   return getUiDisclosureState();
+};
+
+const saveAppSessionState = (sessionState) => {
+  updateSettings((settings) => ({
+    ...settings,
+    appSessionState: {
+      ...getAppSessionState(),
+      ...(sessionState && typeof sessionState === "object" ? sessionState : {}),
+    },
+  }));
+
+  return getAppSessionState();
 };
 
 const getCachedExchangeRate = () => {
@@ -181,9 +219,11 @@ module.exports = {
   getCachedExchangeRate,
   getGeminiApiKey,
   getGeminiSettingsSummary,
+  getAppSessionState,
   getThemeMode,
   getTranscriptionPrompt,
   getUiDisclosureState,
+  saveAppSessionState,
   saveGeminiApiKey,
   saveCachedExchangeRate,
   saveTranscriptionPrompt,

@@ -8,11 +8,12 @@ const execFileAsync = util.promisify(execFile);
 
 const getPlaybackPreviewPath = (recordingPath) => {
   const parsed = path.parse(recordingPath);
-  return path.join(parsed.dir, `.${parsed.name}.preview.wav`);
+  return path.join(parsed.dir, ".meetlify", "derived", `${parsed.name}.preview.wav`);
 };
 
 const ensurePlaybackPreview = async (recordingPath) => {
   const previewPath = getPlaybackPreviewPath(recordingPath);
+  await fs.mkdir(path.dirname(previewPath), { recursive: true });
   const [sourceStats, previewStats] = await Promise.all([
     fs.stat(recordingPath),
     fs.stat(previewPath).catch(() => null),

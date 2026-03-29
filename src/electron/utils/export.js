@@ -102,7 +102,7 @@ const buildFfmpegArgs = (inputPath) => [
   MP3_BITRATE,
 ];
 
-const exportRecordingToMp3 = async ({ filePath, chunked = false }) => {
+const exportRecordingToMp3 = async ({ filePath, chunked = false, outputBaseName = null }) => {
   const ffmpegPath = resolveFfmpegPath();
   const stats = await fsPromises.stat(filePath);
 
@@ -111,9 +111,14 @@ const exportRecordingToMp3 = async ({ filePath, chunked = false }) => {
   }
 
   const parsed = path.parse(filePath);
+  const safeBaseName = (outputBaseName || parsed.name)
+    .trim()
+    .replace(/[/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    || parsed.name;
 
   if (!chunked) {
-    const outputPath = path.join(parsed.dir, `${parsed.name}.mp3`);
+    const outputPath = path.join(parsed.dir, `${safeBaseName}.mp3`);
 
     await runProcess(ffmpegPath, [...buildFfmpegArgs(filePath), outputPath]);
 
@@ -126,8 +131,8 @@ const exportRecordingToMp3 = async ({ filePath, chunked = false }) => {
     };
   }
 
-  const outputDirectory = path.join(parsed.dir, `${parsed.name}-mp3-chunks`);
-  const outputPattern = path.join(outputDirectory, `${parsed.name}.part%03d.mp3`);
+  const outputDirectory = path.join(parsed.dir, `${safeBaseName}-mp3-chunks`);
+  const outputPattern = path.join(outputDirectory, `${safeBaseName}.part%03d.mp3`);
 
   await fsPromises.rm(outputDirectory, { recursive: true, force: true });
   await fsPromises.mkdir(outputDirectory, { recursive: true });

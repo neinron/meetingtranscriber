@@ -1,0 +1,15 @@
+FROM node:20-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    git \
+    ca-certificates \
+    bash \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+RUN useradd --create-home --shell /bin/bash appuser
+USER appuser
+
+CMD ["bash"]

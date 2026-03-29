@@ -1,8 +1,35 @@
+const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
+const path = require("node:path");
 const { execFile } = require("node:child_process");
 const util = require("node:util");
+const { resolveFfmpegPath } = require("./export");
 
 const execFileAsync = util.promisify(execFile);
+
+const resolveFfprobePath = () => {
+  const ffmpegPath = resolveFfmpegPath();
+  const siblingProbePath = path.join(path.dirname(ffmpegPath), "ffprobe");
+  if (fsSync.existsSync(siblingProbePath)) {
+    return siblingProbePath;
+  }
+
+  const candidates = [
+    process.env.FFPROBE_PATH,
+    process.env.HOMEBREW_PREFIX ? path.join(process.env.HOMEBREW_PREFIX, "bin", "ffprobe") : null,
+    "/opt/homebrew/bin/ffprobe",
+    "/usr/local/bin/ffprobe",
+    "/usr/bin/ffprobe",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fsSync.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error("FFprobe is required to inspect recording duration.");
+};
 
 const parseDurationSeconds = (value) => {
   const parsed = Number(value);
@@ -10,7 +37,7 @@ const parseDurationSeconds = (value) => {
 };
 
 const getDurationWithFfprobe = async (filePath) => {
-  const { stdout } = await execFileAsync("/opt/homebrew/bin/ffprobe", [
+  const { stdout } = await execFileAsync(resolveFfprobePath(), [
     "-v",
     "error",
     "-show_entries",

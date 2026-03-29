@@ -543,6 +543,8 @@
         .sidebar-item { transition: all 0.2s; }
         .sidebar-item:hover { background-color: rgba(255, 255, 255, 0.05); }
         .sidebar-item.active { background-color: rgba(0, 122, 255, 0.2); color: #4facfe; }
+        .sidebar-item.pending { opacity: 0.65; cursor: default; }
+        .sidebar-item.error { border: 1px solid rgba(239, 68, 68, 0.35); }
         body[data-theme="light"] .sidebar-item:hover { background-color: rgba(15, 23, 42, 0.05); }
 
         .resizer { width: 2px; cursor: col-resize; background-color: var(--border-main); z-index: 10; }
@@ -557,7 +559,13 @@
         #preview-content code { background: rgba(127, 127, 127, 0.18); padding: 0.1rem 0.35rem; border-radius: 4px; }
         #preview-content pre { margin-bottom: 0.75rem; padding: 1rem; border-radius: 8px; background: var(--surface-card-alt); overflow: auto; }
 
-        .title-edit-active { background-color: #1a3a5a; outline: none; border-radius: 4px; padding: 2px 8px; box-shadow: 0 0 0 2px var(--macos-accent); }
+        .title-edit-active {
+            background: var(--surface-card-alt);
+            outline: none;
+            border-radius: 18px;
+            padding: 12px 18px;
+            box-shadow: inset 0 0 0 1px var(--border-main);
+        }
         .title-edit-active[data-empty="true"]::before {
             content: attr(data-placeholder);
             color: var(--text-soft);
@@ -586,6 +594,43 @@
 
         .hidden-panel { display: none !important; }
         .disabled-button { opacity: 0.45; pointer-events: none; }
+        .state-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(0, 0, 0, 0.28);
+            backdrop-filter: blur(8px);
+            z-index: 30;
+        }
+        body[data-theme="light"] .state-overlay {
+            background: rgba(255, 255, 255, 0.55);
+        }
+        .state-overlay-card {
+            width: min(560px, calc(100vw - 48px));
+            padding: 24px;
+            border-radius: 18px;
+            background: var(--surface-card);
+            border: 1px solid var(--border-soft);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+        }
+        .review-warning-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            background: rgba(245, 158, 11, 0.1);
+            color: #fbbf24;
+        }
+        body[data-theme="light"] .review-warning-banner {
+            background: rgba(245, 158, 11, 0.12);
+            color: #92400e;
+        }
         .app-modal-backdrop {
             position: fixed;
             inset: 0;
@@ -621,6 +666,75 @@
             border-top: 1px solid var(--border-soft);
             z-index: 30;
         }
+        .debug-console-panel {
+            position: absolute;
+            right: 16px;
+            bottom: 16px;
+            width: min(720px, calc(100vw - 32px));
+            height: min(320px, calc(100vh - 96px));
+            display: flex;
+            flex-direction: column;
+            border-radius: 16px;
+            border: 1px solid var(--border-soft);
+            background: rgba(9, 9, 11, 0.94);
+            backdrop-filter: blur(12px);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+            z-index: 35;
+            overflow: hidden;
+        }
+        body[data-theme="light"] .debug-console-panel {
+            background: rgba(255, 255, 255, 0.95);
+        }
+        .debug-console-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-soft);
+            background: var(--surface-muted);
+        }
+        .debug-console-body {
+            flex: 1;
+            overflow: auto;
+            padding: 12px 14px 16px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-size: 11px;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text-main);
+        }
+        .debug-console-entry {
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border-soft);
+        }
+        .debug-console-entry:last-child {
+            border-bottom: none;
+        }
+        .debug-console-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--text-soft);
+            margin-bottom: 2px;
+        }
+        .debug-console-scope {
+            color: #60a5fa;
+        }
+        .debug-console-entry.debug-error .debug-console-scope {
+            color: #f87171;
+        }
+        .debug-console-entry.debug-warn .debug-console-scope {
+            color: #fbbf24;
+        }
+        .debug-console-empty {
+            color: var(--text-soft);
+        }
 
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .animate-spin-fast { animation: spin 1s linear infinite; }
@@ -631,15 +745,25 @@
         <div class="flex items-center gap-4">
             <span class="text-xs font-semibold tracking-wider" style="color: var(--text-soft);">MEETLIFY PRO</span>
         </div>
-        <div id="status-display" class="text-[11px] italic" style="color: var(--text-soft);">Ready</div>
+        <div class="flex items-center gap-3">
+            <div id="status-display" class="text-[11px] italic" style="color: var(--text-soft);">Ready</div>
+            <button id="toggle-debug-console" type="button" class="btn-pro-standard btn-system-tertiary h-7 px-3">
+                <i data-lucide="bug" class="w-3.5 h-3.5"></i>
+                DEBUG
+            </button>
+        </div>
     </header>
 
     <div class="flex flex-1 overflow-hidden">
         <aside id="sidebar-pane" class="border-r flex flex-col z-20 relative" style="width: 256px; background: var(--surface-sidebar); border-color: var(--border-soft);">
-            <div class="p-4 border-b flex items-center justify-between gap-2" style="border-color: var(--border-soft);">
+            <div class="p-4 border-b flex flex-col gap-2" style="border-color: var(--border-soft);">
                 <button id="sidebar-new-recording" class="btn-pro-primary w-full h-10" type="button" style="background-color: #2563eb; color: white;">
                     <i data-lucide="plus" class="w-4 h-4"></i>
                     NEW RECORDING
+                </button>
+                <button id="import-recordings" class="btn-pro-standard btn-system-secondary w-full h-9" type="button">
+                    <i data-lucide="import" class="w-3.5 h-3.5"></i>
+                    IMPORT MEDIA
                 </button>
             </div>
 
@@ -729,6 +853,9 @@
                 <button id="sidebar-rail-new-recording" type="button" class="btn-pro-icon h-8 w-8 p-0" style="background-color: #2563eb; border-color: #2563eb; color: white;">
                     <i data-lucide="plus" class="w-4 h-4"></i>
                 </button>
+                <button id="sidebar-rail-import-recordings" type="button" class="btn-pro-icon btn-system-secondary mt-3">
+                    <i data-lucide="import" class="w-4 h-4"></i>
+                </button>
             </div>
             <div class="w-full flex flex-col items-center pt-3">
                 <button id="restore-sidebar" type="button" class="btn-pro-icon btn-system-secondary">
@@ -741,6 +868,39 @@
         </div>
 
         <main class="flex-1 relative" style="background: var(--surface-main);">
+            <section id="app-state-overlay" class="state-overlay hidden-panel">
+                <div class="state-overlay-card space-y-4">
+                    <div class="space-y-1">
+                        <div id="app-state-eyebrow" class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-soft);">App State</div>
+                        <h2 id="app-state-title" class="text-xl font-semibold" style="color: var(--text-main);">Starting Meetlify</h2>
+                        <p id="app-state-body" class="text-sm leading-6" style="color: var(--text-soft);">Loading your library and current app state.</p>
+                    </div>
+                    <div id="app-state-actions" class="flex gap-3">
+                        <button id="app-state-primary" type="button" class="btn-pro-standard btn-system-secondary h-10 hidden-panel">Continue</button>
+                        <button id="app-state-secondary" type="button" class="btn-pro-standard btn-system-tertiary h-10 hidden-panel">Cancel</button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="debug-console-panel" class="debug-console-panel hidden-panel">
+                <div class="debug-console-header">
+                    <div class="min-w-0">
+                        <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-soft);">Debug Console</div>
+                        <div class="text-[11px]" style="color: var(--text-soft);">Renderer events and session log entries inside the app.</div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <button id="copy-debug-console" type="button" class="btn-pro-standard btn-system-tertiary h-8">Copy</button>
+                        <button id="clear-debug-console" type="button" class="btn-pro-standard btn-system-tertiary h-8">Clear</button>
+                        <button id="close-debug-console" type="button" class="btn-pro-icon btn-system-tertiary btn-icon-muted h-8 w-8" title="Close debug console">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="debug-console-output" class="debug-console-body no-scrollbar">
+                    <div class="debug-console-empty">Debug mode is active. New log entries will appear here.</div>
+                </div>
+            </section>
+
             <section id="setup-view" class="absolute inset-0 p-8 flex flex-col items-center justify-center space-y-10">
                 <div class="w-full max-w-xl space-y-8 -mt-10">
                     <div class="p-6 rounded-2xl shadow-2xl space-y-6" style="background: var(--surface-muted); border: 1px solid var(--border-soft);">
@@ -783,11 +943,25 @@
                             <button id="open-transcript-button" type="button" class="p-1 hover:bg-zinc-800 rounded transition-colors disabled-button" style="color: var(--text-soft);" title="Open transcript">
                                 <i data-lucide="folder" class="w-4 h-4"></i>
                             </button>
-                            <button id="title-edit-button" type="button" class="p-1 hover:bg-zinc-800 rounded transition-colors" style="color: var(--text-soft);"><i data-lucide="pen" class="w-4 h-4" id="title-edit-icon"></i></button>
+                            <button id="title-edit-button" type="button" class="p-1 hover:bg-zinc-800 rounded transition-colors" style="color: var(--text-soft);" title="Edit title"><i data-lucide="pen" class="w-4 h-4" id="title-edit-icon"></i></button>
                         </div>
                         <div class="toolbar-row text-xs font-medium" style="color: var(--text-soft);">
                             <span id="meta-date-time">-</span>
                             <span class="px-2 py-0.5 rounded text-[10px] uppercase" style="background: var(--button-main); color: var(--text-soft); border: 1px solid var(--border-main);">Session</span>
+                        </div>
+                    </div>
+
+                    <div id="review-warning-banner" class="review-warning-banner hidden-panel">
+                        <div class="flex items-start gap-3 min-w-0">
+                            <i data-lucide="shield-alert" class="w-4 h-4 mt-0.5 flex-shrink-0"></i>
+                            <div class="min-w-0">
+                                <div class="text-xs font-semibold">Transcript Needs Review</div>
+                                <div id="review-warning-text" class="text-[11px] leading-5" style="color: inherit;">Gemini returned low-confidence content. Verify this transcript against the source audio before relying on it.</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <button id="review-warning-retry" type="button" class="btn-pro-standard btn-system-tertiary h-8">Retry</button>
+                            <button id="review-warning-accept" type="button" class="btn-pro-standard btn-system-secondary h-8">Accept</button>
                         </div>
                     </div>
 
@@ -896,6 +1070,9 @@
                                 <button id="export-mp3" type="button" class="btn-pro-standard btn-system-tertiary font-normal h-7">
                                     <i data-lucide="download" class="w-3 h-3"></i> MP3
                                 </button>
+                                <button id="delete-recording" type="button" class="btn-pro-standard btn-system-tertiary font-normal h-7">
+                                    <i data-lucide="trash-2" class="w-3 h-3"></i> DELETE
+                                </button>
                              </div>
                         </div>
                         <div class="flex-1 p-8 overflow-y-auto prose prose-sm max-w-none no-scrollbar" id="preview-content"></div>
@@ -966,6 +1143,19 @@
             <div class="flex gap-3">
                 <button id="retranscribe-confirm" type="button" class="btn-pro-standard btn-system-secondary flex-1 h-10">Override</button>
                 <button id="retranscribe-cancel" type="button" class="btn-pro-standard btn-system-tertiary h-10">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="delete-recording-modal" class="app-modal-backdrop hidden-panel">
+        <div class="app-modal-card space-y-4">
+            <div class="space-y-1">
+                <h2 class="text-sm font-semibold" style="color: var(--text-main);">Delete library item?</h2>
+                <p class="text-xs leading-5" style="color: var(--text-soft);">Delete <span id="delete-recording-name" style="color: var(--text-main);">this item</span> from the library, including its managed recording, transcript, and derived files.</p>
+            </div>
+            <div class="flex gap-3">
+                <button id="delete-recording-confirm" type="button" class="btn-pro-standard btn-system-secondary flex-1 h-10">Delete</button>
+                <button id="delete-recording-cancel" type="button" class="btn-pro-standard btn-system-tertiary h-10">Cancel</button>
             </div>
         </div>
     </div>

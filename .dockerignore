@@ -1,0 +1,8 @@
+node_modules
+out
+dist
+.git
+.DS_Store
+npm-debug.log*
+.env
+src/swift/Recorder
